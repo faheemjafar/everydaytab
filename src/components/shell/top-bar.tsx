@@ -3,12 +3,11 @@
 import { Fragment } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronRight, Heart, Search, Settings } from "lucide-react";
+import { ChevronRight, Search, Settings } from "lucide-react";
 import { GithubIcon as Github } from "@/components/github-icon";
 import { cn } from "@/lib/utils";
 import { getCategory, tools } from "@/lib/tools";
 import { openCommandPalette } from "@/lib/events";
-import { KOFI_URL } from "@/lib/support";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
 
 interface Crumb {
@@ -83,16 +82,6 @@ export function TopBar() {
 
         {/* Actions */}
         <div className="flex items-center gap-0.5 shrink-0">
-          <a
-            href={KOFI_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hidden md:inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
-            aria-label="Sponsor on Ko-fi"
-          >
-            <Heart className="w-3.5 h-3.5 fill-current" />
-            Sponsor
-          </a>
           <a
             href="https://github.com/faheemjafar/everydaytab"
             target="_blank"

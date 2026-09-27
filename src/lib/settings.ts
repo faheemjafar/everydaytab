@@ -30,8 +30,6 @@ export interface Settings {
   recentsLimit: RecentsLimit;
   seoContent: SeoMode;
   fullWidthTools: boolean;
-  // Support
-  showSupportPrompt: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -46,7 +44,6 @@ export const DEFAULT_SETTINGS: Settings = {
   recentsLimit: 10,
   seoContent: "collapsed",
   fullWidthTools: false,
-  showSupportPrompt: true,
 };
 
 export const SETTINGS_KEY = "everydaytab:settings";
@@ -58,7 +55,6 @@ export const ALL_STORAGE_KEYS = [
   SETTINGS_KEY,
   FAVORITES_KEY,
   RECENTS_KEY,
-  "everydaytab:support-prompt:lastShownAt",
   "theme",
 ];
 
@@ -79,7 +75,6 @@ export function sanitizeSettings(input: unknown): Settings {
     recentsLimit: pick(s.recentsLimit, RECENTS_LIMITS, DEFAULT_SETTINGS.recentsLimit),
     seoContent: pick(s.seoContent, SEO_MODES, DEFAULT_SETTINGS.seoContent),
     fullWidthTools: bool(s.fullWidthTools, DEFAULT_SETTINGS.fullWidthTools),
-    showSupportPrompt: bool(s.showSupportPrompt, DEFAULT_SETTINGS.showSupportPrompt),
   };
 }
 

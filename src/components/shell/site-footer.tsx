@@ -1,7 +1,5 @@
 import Link from "next/link";
-import { Heart } from "lucide-react";
 import { GithubIcon as Github } from "@/components/github-icon";
-import { KOFI_URL } from "@/lib/support";
 import { tools } from "@/lib/tools";
 
 export function SiteFooter() {
@@ -25,14 +23,6 @@ export function SiteFooter() {
             className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm hover:text-foreground hover:bg-muted transition-colors"
           >
             <Github className="w-3.5 h-3.5" /> GitHub
-          </a>
-          <a
-            href={KOFI_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-sm text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
-          >
-            <Heart className="w-3.5 h-3.5 fill-current" /> Sponsor
           </a>
         </nav>
       </div>

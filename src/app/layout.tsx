@@ -4,7 +4,6 @@ import "./globals.css";
 import { cn } from "@/lib/utils";
 import { AppShell } from "@/components/shell/app-shell";
 import { CommandPalette } from "@/components/command-palette";
-import { SupportPrompt } from "@/components/support-prompt";
 import { ToastProvider } from "@/hooks/use-toast";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SETTINGS_BOOT_SCRIPT } from "@/lib/settings";
@@ -189,7 +188,6 @@ export default function RootLayout({
         >
           <ToastProvider>
             <CommandPalette />
-            <SupportPrompt />
             <AppShell>{children}</AppShell>
           </ToastProvider>
         </ThemeProvider>

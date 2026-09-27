@@ -3,7 +3,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
-import { Check, Coffee, Download, Heart, Monitor, Moon, Sun, Trash2, Upload } from "lucide-react";
+import { Check, Download, Monitor, Moon, Sun, Trash2, Upload } from "lucide-react";
 import { GithubIcon as Github } from "@/components/github-icon";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -23,14 +23,13 @@ import {
   type Accent,
   type Settings,
 } from "@/lib/settings";
-import { KOFI_URL, SUPPORT_CONFIG } from "@/lib/support";
 import { tools } from "@/lib/tools";
 
 const SECTIONS = [
   { id: "appearance", label: "Appearance" },
   { id: "behaviour", label: "Behaviour" },
   { id: "data", label: "Data" },
-  { id: "support", label: "Support & about" },
+  { id: "about", label: "About" },
 ] as const;
 
 const ACCENT_SWATCH: Record<Accent, string> = {
@@ -268,37 +267,22 @@ export function SettingsClient() {
             </Row>
           </Section>
 
-          {/* Support */}
-          <Section id="support" title="Support & about">
-            <Row label="Show support prompt" description="Occasional, dismissible note after you download a result (max once per 3 days).">
-              <Switch checked={settings.showSupportPrompt} onCheckedChange={(v) => update("showSupportPrompt", v)} />
+          {/* About */}
+          <Section id="about" title="About">
+            <Row label="EverydayTab" description={`${tools.length} free tools. Open source, ad-free, and everything runs in your browser — nothing you paste or upload leaves your device.`}>
+              <Button variant="outline" asChild>
+                <a href="https://github.com/faheemjafar/everydaytab" target="_blank" rel="noopener noreferrer">
+                  <Github /> GitHub
+                </a>
+              </Button>
             </Row>
-            <div className="rounded-md border border-border bg-card p-4 flex flex-col sm:flex-row sm:items-center gap-4">
-              <div className="flex-1 space-y-1">
-                <p className="text-[13px] font-medium flex items-center gap-1.5">
-                  <Heart className="w-3.5 h-3.5 fill-amber-500 text-amber-500" /> Built solo by {SUPPORT_CONFIG.authorName}
-                </p>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  EverydayTab is free, open source and ad-free. {tools.length} tools and counting. If it saves you time, a coffee
-                  keeps it that way.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <Button asChild>
-                  <a href={KOFI_URL} target="_blank" rel="noopener noreferrer">
-                    <Coffee /> Buy me a coffee
-                  </a>
-                </Button>
-                <Button variant="outline" asChild>
-                  <a href="https://github.com/faheemjafar/everydaytab" target="_blank" rel="noopener noreferrer">
-                    <Github /> GitHub
-                  </a>
-                </Button>
-              </div>
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              All processing happens in your browser. Nothing you paste or upload leaves your device.
-            </p>
+            <Row label="Found a bug or want a tool?" description="Issues and pull requests are welcome.">
+              <Button variant="ghost" asChild>
+                <a href="https://github.com/faheemjafar/everydaytab/issues" target="_blank" rel="noopener noreferrer">
+                  Open an issue
+                </a>
+              </Button>
+            </Row>
           </Section>
         </div>
       </div>
