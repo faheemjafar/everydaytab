@@ -1,3 +1,5 @@
+import type React from "react";
+
 export interface Tool {
   id: string;
   name: string;
@@ -11,96 +13,138 @@ export interface Tool {
 export interface Category {
   id: string;
   name: string;
+  /** Short label for dense UI (rail tooltips, chips). */
+  short: string;
   description: string;
   icon: string;
+  /** OKLCH hue used to tint this category's icon chip (see .cat-chip). */
+  hue: number;
 }
 
 export const categories: Category[] = [
   {
     id: 'pdf',
     name: 'PDF Tools',
+    short: 'PDF',
     description: 'Best free PDF tools online — merge, split, compress, rotate, add watermarks, page numbers, headers, and more. No sign-up required, all processing happens in your browser.',
     icon: 'FileText',
+    hue: 25,
   },
   {
     id: 'developer',
     name: 'Developer Tools',
+    short: 'Developer',
     description: 'Best free developer tools online — JSON formatter, JWT parser, regex tester, cron validator, curl converter, Docker compose generator, and more. No sign-up required, all browser-based.',
     icon: 'Code2',
+    hue: 285,
   },
   {
     id: 'text',
     name: 'Text Tools',
+    short: 'Text',
     description: 'Free online text tools — word counter, case converter, text diff, lorem ipsum generator, markdown editor, slugify, and more utilities for writers, developers, and students.',
-    icon: 'FileText',
+    icon: 'Type',
+    hue: 240,
   },
   {
     id: 'converter',
     name: 'Converters',
+    short: 'Convert',
     description: 'Best free online converters — Unix timestamp, unit converter, IBAN validator, Base64, color formats, IPv4, number bases, and more. Instant results, no sign-up required.',
     icon: 'RefreshCw',
+    hue: 160,
   },
   {
     id: 'math',
     name: 'Math',
+    short: 'Math',
     description: 'Free online math tools — calculator, percentage calculator, ETA calculator, math expression evaluator, stopwatch, datetime hub, and more. No sign-up required.',
     icon: 'Calculator',
+    hue: 80,
   },
   {
     id: 'image',
     name: 'Image Tools',
+    short: 'Image',
     description: 'Free online image tools — image resizer, CSS grid generator, flexbox generator, SVG optimizer, color palette extractor, contrast checker, and more. No sign-up required.',
     icon: 'Image',
+    hue: 320,
   },
   {
     id: 'color',
     name: 'Color Tools',
+    short: 'Color',
     description: 'Free online color tools — color converter for HEX, RGB, HSL, OKLCH, LAB, and LCH. Includes color palette extractor, contrast checker, and gradient generator. No sign-up required.',
     icon: 'Palette',
+    hue: 350,
   },
   {
     id: 'file',
     name: 'File Tools',
+    short: 'Files',
     description: 'Free online file tools — ZIP compressor, archive extractor, batch file renamer, and more. All processing happens directly in your browser, no file upload to servers.',
     icon: 'FolderOpen',
+    hue: 60,
   },
   {
     id: 'seo',
     name: 'SEO Tools',
+    short: 'SEO',
     description: 'Free online SEO tools — meta tag generator, Open Graph builder, robots.txt generator, XML sitemap creator, FAQ schema generator, keyword analyzer, URL slug generator, and more.',
     icon: 'Search',
+    hue: 200,
   },
   {
     id: 'markdown',
     name: 'Markdown Tools',
+    short: 'Markdown',
     description: 'Free online Markdown tools — live editor, table generator, cheatsheet, markdown-to-HTML converter, and file combiner. No sign-up required, all browser-based.',
     icon: 'BookOpen',
+    hue: 260,
   },
   {
     id: 'generator',
     name: 'Generators',
+    short: 'Generate',
     description: 'Free online generator tools — UUID generator, QR code generator, password generator, Lorem Ipsum generator, barcode generator, ULID, WiFi QR, and more. Instant generation, no sign-up.',
     icon: 'Sparkles',
+    hue: 140,
   },
   {
     id: 'security',
     name: 'Security',
+    short: 'Security',
     description: 'Free online security tools — hash generator, AES encryption, JWT generator, bcrypt, RSA key generator, password strength checker, OTP generator, and more. No sign-up required.',
     icon: 'ShieldCheck',
+    hue: 15,
   },
   {
     id: 'audio',
     name: 'Audio Tools',
+    short: 'Audio',
     description: 'Free online audio tools — audio converter, audio trimmer, audio merger, audio compressor, volume adjuster, audio reverser, and more. No file upload to servers, all browser-based.',
     icon: 'Music',
+    hue: 340,
   },
   {
     id: 'video',
     name: 'Video Tools',
+    short: 'Video',
     description: 'Free online video tools — video converter, video compressor, video trimmer, video merger, video rotator, mute video, extract audio, and more. Works entirely in your browser, no upload needed.',
     icon: 'Video',
+    hue: 40,
   },
 ];
+
+export function getCategory(id: string): Category | undefined {
+  return categories.find((c) => c.id === id);
+}
+
+/** Inline style that tints `.cat-chip` elements with the category hue. */
+export function categoryStyle(category?: Category | string): React.CSSProperties {
+  const cat = typeof category === "string" ? getCategory(category) : category;
+  return { "--cat-h": cat?.hue ?? 190 } as React.CSSProperties;
+}
 
 export const tools: Tool[] = [
   // PDF Tools

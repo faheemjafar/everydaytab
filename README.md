@@ -29,10 +29,11 @@ EverydayTab provides **160+ utilities** across **9 categories**, all running cli
 ### Key Design Principles
 
 - **Privacy First** — All processing happens in the browser. No data is sent to any server.
-- **Keyboard-Friendly** — Global search with `Cmd+K` / `Ctrl+K`, arrow key navigation, and quick tool access.
+- **Keyboard-Friendly** — Global search with `Cmd+K` / `Ctrl+K`, settings with `Cmd+,`, arrow key navigation, and quick tool access.
 - **Accessible** — Built with accessibility in mind using Radix UI primitives and semantic HTML.
 - **Dark & Light Mode** — Seamless theme switching with `next-themes`.
-- **Responsive** — Fully responsive layout with a collapsible sidebar on desktop and mobile.
+- **Responsive** — Icon rail with hover/pinnable tool flyouts on desktop; bottom tab bar and full-screen browser on mobile.
+- **Customisable** — Settings page for theme, accent colour, density, font size, sidebar behaviour, and local data management.
 - **Fast** — Optimized with Next.js App Router, lazy loading, and efficient client-side rendering.
 
 ## Tech Stack

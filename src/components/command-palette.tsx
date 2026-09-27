@@ -1,182 +1,190 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
+import { Clock, Home, LayoutGrid, Moon, Settings, Star, Sun } from "lucide-react";
 import {
   CommandDialog,
-  CommandInput,
-  CommandList,
   CommandEmpty,
   CommandGroup,
+  CommandInput,
   CommandItem,
+  CommandList,
   CommandSeparator,
   CommandShortcut,
 } from "@/components/ui/command";
-import { tools, categories } from "@/lib/tools";
+import { categories, categoryStyle, getCategory, tools, type Tool } from "@/lib/tools";
 import { LucideIcon } from "@/components/lucide-icon";
 import { usePersistentTools } from "@/hooks/use-persistent-tools";
-import { Search, Sparkles, Star, History, ArrowRight } from "lucide-react";
+import { CMD_PALETTE_EVENT } from "@/lib/events";
 
-// Global event to open/close command palette programmatically
-export const CMD_PALETTE_EVENT = "everydaytab_toggle_cmd_palette";
+export { CMD_PALETTE_EVENT };
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const router = useRouter();
+  const { resolvedTheme, setTheme } = useTheme();
   const { favoriteTools, recentTools, addRecent, mounted } = usePersistentTools();
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        setOpen((open) => !open);
+        setOpen((o) => !o);
       }
     };
-
-    const handleToggle = () => {
-      setOpen((open) => !open);
-    };
-
+    const toggle = () => setOpen((o) => !o);
     document.addEventListener("keydown", down);
-    window.addEventListener(CMD_PALETTE_EVENT, handleToggle);
-
+    window.addEventListener(CMD_PALETTE_EVENT, toggle);
     return () => {
       document.removeEventListener("keydown", down);
-      window.removeEventListener(CMD_PALETTE_EVENT, handleToggle);
+      window.removeEventListener(CMD_PALETTE_EVENT, toggle);
     };
   }, []);
 
-  const runCommand = (action: () => void) => {
-    setOpen(false);
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) setQuery("");
+  };
+
+  const run = (action: () => void) => {
+    onOpenChange(false);
     action();
   };
 
-  const toolsByCategory = useMemo(() => {
-    const grouped: Record<string, typeof tools> = {};
-    tools.forEach((tool) => {
-      if (!grouped[tool.category]) {
-        grouped[tool.category] = [];
-      }
-      grouped[tool.category].push(tool);
+  const go = (tool: Tool) =>
+    run(() => {
+      addRecent(tool.id);
+      router.push(tool.path);
     });
+
+  const searching = query.trim().length > 0;
+
+  // Without a query, show a compact "start" view; with a query, flat results across everything.
+  const toolsByCategory = useMemo(() => {
+    const grouped: Record<string, Tool[]> = {};
+    for (const t of tools) (grouped[t.category] ||= []).push(t);
     return grouped;
   }, []);
 
   return (
     <CommandDialog
       open={open}
-      onOpenChange={setOpen}
-      title="Search EverydayTab Tools"
-      description="Type a tool name, tag, or category to quickly open any tool instantly."
-      className="max-w-2xl border border-border shadow-xl rounded-xl overflow-hidden bg-popover"
+      onOpenChange={onOpenChange}
+      title="Search EverydayTab"
+      description="Type a tool name, tag or category."
+      className="sm:max-w-xl rounded-lg shadow-float overflow-hidden"
     >
       <CommandInput
-        placeholder="Search tools, categories, tags..."
-        className="h-12 font-medium text-sm pl-4 focus:ring-0 focus:outline-none border-b border-border"
+        value={query}
+        onValueChange={setQuery}
+        placeholder={`Search ${tools.length} tools, categories, actions…`}
+        className="h-11 text-sm"
       />
-      <CommandList className="max-h-[450px] p-2 overflow-y-auto custom-scrollbar">
-        <CommandEmpty className="py-12 text-center text-sm text-muted-foreground">
-          No matching tools found.
-        </CommandEmpty>
+      <CommandList className="max-h-[60vh] p-1.5 custom-scrollbar">
+        <CommandEmpty className="py-10 text-center text-sm text-muted-foreground">No results.</CommandEmpty>
 
-        {/* Favorites Group */}
-        {mounted && favoriteTools.length > 0 && (
-          <>
-            <CommandGroup heading="★ Favorites">
-              {favoriteTools.map((tool) => (
-                <CommandItem
-                  key={`cmd-fav-${tool.id}`}
-                  value={`favorite ${tool.name} ${tool.description} ${tool.tags?.join(" ") || ""}`.toLowerCase()}
-                  onSelect={() =>
-                    runCommand(() => {
-                      addRecent(tool.id);
-                      router.push(tool.path);
-                    })
-                  }
-                  className="flex items-center gap-3 px-2.5 py-2 rounded-md cursor-pointer transition-colors hover:bg-accent"
-                >
-                  <div className="flex items-center justify-center w-7 h-7 rounded-md bg-amber-500/10 text-amber-500 shrink-0">
-                    <LucideIcon name={tool.icon} className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-foreground">{tool.name}</p>
-                    <p className="text-[10px] text-muted-foreground truncate">{tool.description}</p>
-                  </div>
-                  <CommandShortcut>
-                    <ArrowRight className="w-3 h-3 text-muted-foreground/50 opacity-0 group-hover/command-item:opacity-100 transition-opacity" />
-                  </CommandShortcut>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-            <CommandSeparator className="my-2 opacity-50" />
-          </>
+        {!searching && mounted && recentTools.length > 0 && (
+          <CommandGroup heading="Recent">
+            {recentTools.slice(0, 5).map((t) => (
+              <ToolItem key={`r-${t.id}`} tool={t} onSelect={() => go(t)} prefix="recent" icon={<Clock className="w-3.5 h-3.5" />} />
+            ))}
+          </CommandGroup>
         )}
 
-        {/* Recently Used Group */}
-        {mounted && recentTools.length > 0 && (
-          <>
-            <CommandGroup heading="↺ Recently Visited">
-              {recentTools.map((tool) => (
-                <CommandItem
-                  key={`cmd-recent-${tool.id}`}
-                  value={`recent ${tool.name} ${tool.description} ${tool.tags?.join(" ") || ""}`.toLowerCase()}
-                  onSelect={() =>
-                    runCommand(() => {
-                      addRecent(tool.id);
-                      router.push(tool.path);
-                    })
-                  }
-                  className="flex items-center gap-3 px-2.5 py-2 rounded-md cursor-pointer transition-colors hover:bg-accent"
-                >
-                  <div className="flex items-center justify-center w-7 h-7 rounded-md bg-primary/10 text-primary shrink-0">
-                    <LucideIcon name={tool.icon} className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-foreground">{tool.name}</p>
-                    <p className="text-[10px] text-muted-foreground truncate">{tool.description}</p>
-                  </div>
-                  <CommandShortcut>
-                    <ArrowRight className="w-3 h-3 text-muted-foreground/50 opacity-0 group-hover/command-item:opacity-100 transition-opacity" />
-                  </CommandShortcut>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-            <CommandSeparator className="my-2 opacity-50" />
-          </>
+        {!searching && mounted && favoriteTools.length > 0 && (
+          <CommandGroup heading="Favorites">
+            {favoriteTools.slice(0, 6).map((t) => (
+              <ToolItem key={`f-${t.id}`} tool={t} onSelect={() => go(t)} prefix="favorite" icon={<Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />} />
+            ))}
+          </CommandGroup>
         )}
 
-        {/* Categorized Tools */}
-        {categories.map((cat) => {
-          const catTools = toolsByCategory[cat.id] || [];
-          if (catTools.length === 0) return null;
+        <CommandGroup heading="Navigate">
+          <CommandItem value="go home dashboard" onSelect={() => run(() => router.push("/"))}>
+            <Home className="text-muted-foreground" /> Home
+          </CommandItem>
+          <CommandItem value="go favorites" onSelect={() => run(() => router.push("/favorites"))}>
+            <Star className="text-muted-foreground" /> Favorites
+          </CommandItem>
+          <CommandItem value="open settings preferences" onSelect={() => run(() => router.push("/settings"))}>
+            <Settings className="text-muted-foreground" /> Settings
+            <CommandShortcut>⌘,</CommandShortcut>
+          </CommandItem>
+          <CommandItem
+            value="toggle theme dark light mode"
+            onSelect={() => run(() => setTheme(resolvedTheme === "dark" ? "light" : "dark"))}
+          >
+            {resolvedTheme === "dark" ? <Sun className="text-muted-foreground" /> : <Moon className="text-muted-foreground" />}
+            Toggle theme
+          </CommandItem>
+        </CommandGroup>
 
-          return (
-            <CommandGroup key={`group-${cat.id}`} heading={cat.name}>
-              {catTools.map((tool) => (
-                <CommandItem
-                  key={`cmd-tool-${tool.id}`}
-                  value={`${tool.name} ${tool.description} ${tool.category} ${tool.tags?.join(" ") || ""}`.toLowerCase()}
-                  onSelect={() =>
-                    runCommand(() => {
-                      addRecent(tool.id);
-                      router.push(tool.path);
-                    })
-                  }
-                  className="flex items-center gap-3 px-2.5 py-2 rounded-md cursor-pointer transition-colors hover:bg-accent"
-                >
-                  <div className="flex items-center justify-center w-7 h-7 rounded-md bg-muted text-muted-foreground shrink-0">
-                    <LucideIcon name={tool.icon} className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-foreground">{tool.name}</p>
-                    <p className="text-[10px] text-muted-foreground truncate">{tool.description}</p>
-                  </div>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          );
-        })}
+        <CommandGroup heading="Categories">
+          {categories.map((c) => (
+            <CommandItem
+              key={c.id}
+              value={`category ${c.name} ${c.short}`}
+              onSelect={() => run(() => router.push(`/category/${c.id}`))}
+            >
+              <span style={categoryStyle(c)} className="cat-chip w-5 h-5 rounded-sm flex items-center justify-center shrink-0">
+                <LucideIcon name={c.icon} className="w-3 h-3" />
+              </span>
+              {c.name}
+              <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">{toolsByCategory[c.id]?.length ?? 0}</span>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+
+        <CommandSeparator className="my-1" />
+
+        {/* Full tool index – cmdk filters it by value */}
+        <CommandGroup heading={searching ? "Tools" : "All tools"}>
+          {tools.map((t) => (
+            <ToolItem key={t.id} tool={t} onSelect={() => go(t)} showCategory />
+          ))}
+        </CommandGroup>
       </CommandList>
+      <div className="hidden sm:flex items-center gap-3 px-3 h-8 border-t border-border text-[11px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1"><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+        <span className="inline-flex items-center gap-1"><kbd>↵</kbd> open</span>
+        <span className="inline-flex items-center gap-1"><kbd>esc</kbd> close</span>
+        <span className="ml-auto inline-flex items-center gap-1"><LayoutGrid className="w-3 h-3" /> {tools.length} tools</span>
+      </div>
     </CommandDialog>
+  );
+}
+
+function ToolItem({
+  tool,
+  onSelect,
+  prefix = "",
+  icon,
+  showCategory,
+}: {
+  tool: Tool;
+  onSelect: () => void;
+  prefix?: string;
+  icon?: React.ReactNode;
+  showCategory?: boolean;
+}) {
+  const cat = getCategory(tool.category);
+  return (
+    <CommandItem
+      value={`${prefix} ${tool.name} ${tool.description} ${cat?.name ?? ""} ${tool.tags?.join(" ") ?? ""}`}
+      onSelect={onSelect}
+      className="gap-2.5"
+    >
+      <span style={categoryStyle(cat)} className="cat-chip w-6 h-6 rounded-sm flex items-center justify-center shrink-0">
+        {icon ?? <LucideIcon name={tool.icon} className="w-3.5 h-3.5" />}
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-[13px] font-medium truncate">{tool.name}</span>
+        <span className="block text-[11px] text-muted-foreground truncate">{tool.description}</span>
+      </span>
+      {showCategory && cat && <span className="text-[11px] text-muted-foreground shrink-0">{cat.short}</span>}
+    </CommandItem>
   );
 }

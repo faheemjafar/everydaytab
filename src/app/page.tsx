@@ -1,4 +1,3 @@
-import HomeClient from "./home-client";
 import { HomeLanding, HOME_FAQS } from "@/components/home-landing";
 import { JsonLd } from "@/components/json-ld";
 
@@ -18,7 +17,7 @@ export default function HomePage() {
   return (
     <>
       <JsonLd data={faqJsonLd} />
-      <HomeClient landing={<HomeLanding />} />
+      <HomeLanding />
     </>
   );
 }

@@ -1,222 +1,169 @@
 "use client";
 
+import { useMemo, useState, useSyncExternalStore } from "react";
+import { Clock } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { 
-  Clock, 
-  Copy, 
-  Check, 
-  Calendar, 
-  Timer, 
-  ArrowRightLeft, 
-  ArrowDown, 
-  ArrowUp,
-  RefreshCcw,
-  Globe,
-  Info
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { CopyButton, Field, Segmented, SplitLayout, StatusBadge, ToolPanel } from "@/components/tool";
+
+type Unit = "s" | "ms";
+
+/** Parse a timestamp string as seconds or milliseconds; auto-detect 13-digit ms. */
+function parseTs(v: string, unit: Unit): Date | null {
+  const n = Number(v.trim());
+  if (!v.trim() || !Number.isFinite(n)) return null;
+  const ms = unit === "ms" || v.trim().length >= 13 ? n : n * 1000;
+  const d = new Date(ms);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function relative(d: Date, now: number): string {
+  const diff = Math.round((d.getTime() - now) / 1000);
+  const abs = Math.abs(diff);
+  const units: [number, string][] = [
+    [31536000, "year"],
+    [2592000, "month"],
+    [86400, "day"],
+    [3600, "hour"],
+    [60, "minute"],
+    [1, "second"],
+  ];
+  for (const [s, name] of units) {
+    if (abs >= s) {
+      const v = Math.floor(abs / s);
+      return `${v} ${name}${v === 1 ? "" : "s"} ${diff < 0 ? "ago" : "from now"}`;
+    }
+  }
+  return "now";
+}
 
 export default function TimestampConverter() {
-  const [unixInput, setUnixInput] = useState("");
-  const [isoInput, setIsoInput] = useState("");
-  const [currentTime, setCurrentTime] = useState(Math.floor(Date.now() / 1000));
-  const [copied, setCopied] = useState<string | null>(null);
+  const [unit, setUnit] = useState<Unit>("s");
+  // A single "source of truth": the last field edited drives the other.
+  const [source, setSource] = useState<{ kind: "ts" | "iso"; value: string }>({ kind: "ts", value: "" });
+  // Ticking clock; server snapshot is 0 so SSR/hydration match, then the client takes over.
+  const now = useSyncExternalStore(
+    (cb) => {
+      const t = setInterval(cb, 1000);
+      return () => clearInterval(t);
+    },
+    () => Math.floor(Date.now() / 1000) * 1000,
+    () => 0
+  );
 
-  // Update current time every second
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(Math.floor(Date.now() / 1000));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  const date = useMemo(() => {
+    if (!source.value) return null;
+    if (source.kind === "ts") return parseTs(source.value, unit);
+    const d = new Date(source.value);
+    return isNaN(d.getTime()) ? null : d;
+  }, [source, unit]);
 
-  const handleUnixChange = (val: string) => {
-    setUnixInput(val);
-    const ts = parseInt(val);
-    if (!isNaN(ts)) {
-      const date = new Date(ts * 1000);
-      setIsoInput(date.toISOString());
-    } else {
-      setIsoInput("");
-    }
-  };
+  const tsValue = source.kind === "ts" ? source.value : date ? String(unit === "ms" ? date.getTime() : Math.floor(date.getTime() / 1000)) : "";
+  const isoValue = source.kind === "iso" ? source.value : date ? date.toISOString() : "";
+  const invalid = source.value !== "" && !date;
 
-  const handleIsoChange = (val: string) => {
-    setIsoInput(val);
-    const date = new Date(val);
-    if (!isNaN(date.getTime())) {
-      setUnixInput(Math.floor(date.getTime() / 1000).toString());
-    } else {
-      setUnixInput("");
-    }
-  };
+  const nowTs = unit === "ms" ? now : Math.floor(now / 1000);
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  const setNow = () => {
-    const now = Math.floor(Date.now() / 1000);
-    handleUnixChange(now.toString());
-  };
-
-  const copy = (val: string, id: string) => {
-    if (!val) return;
-    navigator.clipboard.writeText(val);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
-  };
-
-  const dateObj = !isNaN(parseInt(unixInput)) ? new Date(parseInt(unixInput) * 1000) : null;
+  const rows = date
+    ? [
+        ["ISO 8601 (UTC)", date.toISOString()],
+        ["RFC 2822", date.toUTCString()],
+        [`Local (${tz})`, date.toLocaleString()],
+        ["Unix seconds", String(Math.floor(date.getTime() / 1000))],
+        ["Unix milliseconds", String(date.getTime())],
+        ["Relative", relative(date, now)],
+        ["Weekday", date.toLocaleDateString(undefined, { weekday: "long" })],
+        ["Day of year", String(Math.floor((date.getTime() - Date.UTC(date.getUTCFullYear(), 0, 0)) / 86400000))],
+      ]
+    : [];
 
   return (
     <ToolLayout toolId="timestamp-converter">
+      <div className="space-y-3">
+        <ToolPanel bodyClassName="flex flex-wrap items-center gap-3 px-3.5 py-2.5">
+          <Clock className="w-4 h-4 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Now</span>
+          <code className="font-mono text-base tabular-nums">{now ? nowTs : "…"}</code>
+          <span className="text-xs text-muted-foreground hidden sm:inline">{now ? new Date(now).toLocaleTimeString() : ""}</span>
+          <span className="flex-1" />
+          <Segmented
+            size="sm"
+            value={unit}
+            onChange={setUnit}
+            options={[
+              { value: "s", label: "Seconds" },
+              { value: "ms", label: "Milliseconds" },
+            ]}
+          />
+          <Button variant="outline" size="sm" onClick={() => setSource({ kind: "ts", value: String(nowTs) })}>
+            Use now
+          </Button>
+        </ToolPanel>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-7 space-y-6">
-          {/* Real-time Ticker */}
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-primary/5 border-primary/10 rounded-3xl overflow-hidden">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center text-primary">
-                  <Timer className="w-5 h-5 animate-pulse" />
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-primary/70">Current Unix Timestamp</p>
-                  <p className="text-2xl font-mono font-bold tracking-tighter text-primary">{currentTime}</p>
-                </div>
-              </div>
-              <Button 
-                onClick={setNow}
-                className="rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 font-bold"
-              >
-                Use Current Time
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Unified Converter */}
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-10">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Unix Timestamp</Label>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className={cn("h-7 text-[10px] font-bold gap-1.5", copied === 'unix' && "text-green-500")}
-                    onClick={() => copy(unixInput, 'unix')}
-                  >
-                    {copied === 'unix' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                    Copy
-                  </Button>
-                </div>
-                <div className="relative">
-                  <Input 
-                    placeholder="Enter seconds since Epoch (e.g. 1715956800)"
-                    value={unixInput}
-                    onChange={(e) => handleUnixChange(e.target.value)}
-                    className="h-16 px-6 rounded-2xl bg-muted/30 border-transparent focus:border-primary/20 text-2xl font-mono"
-                  />
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground/40">SECONDS</div>
-                </div>
-              </div>
-
-              <div className="flex justify-center relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-border/40" />
-                </div>
-                <div className="relative w-10 h-10 rounded-full bg-muted border border-border/40 flex items-center justify-center text-muted-foreground z-10 shadow-sm">
-                  <ArrowRightLeft className="w-4 h-4 rotate-90" />
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">ISO 8601 Date</Label>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className={cn("h-7 text-[10px] font-bold gap-1.5", copied === 'iso' && "text-green-500")}
-                    onClick={() => copy(isoInput, 'iso')}
-                  >
-                    {copied === 'iso' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                    Copy
-                  </Button>
-                </div>
-                <Input 
-                  placeholder="YYYY-MM-DDTHH:mm:ss.sssZ"
-                  value={isoInput}
-                  onChange={(e) => handleIsoChange(e.target.value)}
-                  className="h-16 px-6 rounded-2xl bg-muted/30 border-transparent focus:border-primary/20 text-xl font-mono"
+        <SplitLayout>
+          <ToolPanel title="Convert" bodyClassName="p-3.5 space-y-4" actions={invalid ? <StatusBadge tone="error">Invalid</StatusBadge> : null}>
+            <Field label={`Unix timestamp (${unit === "ms" ? "milliseconds" : "seconds"})`} htmlFor="ts">
+              <div className="flex items-center gap-1.5">
+                <Input
+                  id="ts"
+                  value={tsValue}
+                  onChange={(e) => setSource({ kind: "ts", value: e.target.value })}
+                  placeholder={unit === "ms" ? "1715956800000" : "1715956800"}
+                  inputMode="numeric"
+                  className="font-mono text-base h-10"
                 />
+                <CopyButton text={tsValue} iconOnly />
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            </Field>
+            <Field label="Date / time" hint="ISO 8601, RFC 2822 or anything Date.parse understands." htmlFor="iso">
+              <div className="flex items-center gap-1.5">
+                <Input
+                  id="iso"
+                  value={isoValue}
+                  onChange={(e) => setSource({ kind: "iso", value: e.target.value })}
+                  placeholder="2024-05-17T14:40:00.000Z"
+                  className="font-mono text-base h-10"
+                />
+                <CopyButton text={isoValue} iconOnly />
+              </div>
+            </Field>
+            <Field label="Pick a local date">
+              <Input
+                type="datetime-local"
+                step={1}
+                value={date ? toLocalInput(date) : ""}
+                onChange={(e) => e.target.value && setSource({ kind: "iso", value: new Date(e.target.value).toISOString() })}
+                className="h-10 w-fit"
+              />
+            </Field>
+          </ToolPanel>
 
-        <div className="lg:col-span-5 space-y-6 sticky top-24">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Date Components</span>
-            </div>
-            <CardContent className="p-6">
-              {dateObj ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-4 rounded-2xl bg-muted/20 border border-border/20">
-                      <p className="text-[10px] font-bold uppercase text-muted-foreground/60 mb-1">Local Time</p>
-                      <p className="text-sm font-bold truncate">{dateObj.toLocaleString()}</p>
-                    </div>
-                    <div className="p-4 rounded-2xl bg-muted/20 border border-border/20">
-                      <p className="text-[10px] font-bold uppercase text-muted-foreground/60 mb-1">UTC Time</p>
-                      <p className="text-sm font-bold truncate">{dateObj.toUTCString()}</p>
-                    </div>
+          <ToolPanel title="Details">
+            {date ? (
+              <dl className="divide-y divide-border">
+                {rows.map(([k, v]) => (
+                  <div key={k} className="group flex items-center gap-3 px-3.5 h-10">
+                    <dt className="w-36 shrink-0 text-xs text-muted-foreground truncate">{k}</dt>
+                    <dd className="flex-1 font-mono text-[13px] truncate">{v}</dd>
+                    <CopyButton text={v} iconOnly className="opacity-0 group-hover:opacity-100 focus:opacity-100" />
                   </div>
-                  
-                  <div className="space-y-2">
-                    {[
-                      { label: "Year", value: dateObj.getFullYear() },
-                      { label: "Month", value: dateObj.toLocaleString('default', { month: 'long' }) },
-                      { label: "Day", value: dateObj.getDate() },
-                      { label: "Weekday", value: dateObj.toLocaleString('default', { weekday: 'long' }) },
-                      { label: "Time", value: dateObj.toLocaleTimeString() },
-                    ].map((item) => (
-                      <div key={item.label} className="flex items-center justify-between p-3 rounded-xl hover:bg-muted/30 transition-colors">
-                        <span className="text-xs font-medium text-muted-foreground">{item.label}</span>
-                        <span className="text-sm font-bold font-mono">{item.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="py-12 flex flex-col items-center justify-center text-center space-y-3 opacity-20">
-                  <Calendar className="w-12 h-12" />
-                  <p className="text-sm font-medium">Waiting for valid input...</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="bg-primary/5 rounded-[2rem] p-6 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Globe className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Timezone Info</h3>
-            </div>
-            <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Unix time (also known as Epoch time) is a system for describing a point in time. It is the number of seconds that have elapsed since 00:00:00 UTC, Thursday, 1 January 1970.
-            </p>
-            <div className="pt-2 flex items-center justify-between text-[10px] font-bold text-primary/70 border-t border-primary/10 mt-2">
-              <span>Your Timezone:</span>
-              <span>{Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
-            </div>
-          </div>
-        </div>
+                ))}
+              </dl>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground bg-dots">
+                <p className="text-sm">Enter a timestamp or date</p>
+              </div>
+            )}
+          </ToolPanel>
+        </SplitLayout>
       </div>
     </ToolLayout>
   );
 }
 
+function toLocalInput(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}

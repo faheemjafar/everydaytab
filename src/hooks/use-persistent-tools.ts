@@ -1,113 +1,61 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { getToolById, Tool } from "@/lib/tools";
+import { useCallback, useMemo } from "react";
+import { getToolById, type Tool } from "@/lib/tools";
+import { createLocalStore, useLocalStore, useMounted } from "@/lib/local-store";
+import { FAVORITES_KEY, RECENTS_KEY } from "@/lib/settings";
+import { settingsStore } from "@/hooks/use-settings";
 
-// Custom event to synchronize favorites and recents across components
-const FAVORITES_CHANGED_EVENT = "everydaytab_favorites_changed";
-const RECENTS_CHANGED_EVENT = "everydaytab_recents_changed";
+const toIdList = (raw: unknown): string[] =>
+  Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
+
+export const favoritesStore = createLocalStore<string[]>(FAVORITES_KEY, [], toIdList);
+export const recentsStore = createLocalStore<string[]>(RECENTS_KEY, [], toIdList);
+
+const resolve = (ids: string[]) => ids.map((id) => getToolById(id)).filter((t): t is Tool => !!t);
 
 export function usePersistentTools() {
-  const [favorites, setFavorites] = useState<string[]>([]);
-  const [recents, setRecents] = useState<string[]>([]);
-  const [mounted, setMounted] = useState(false);
+  const [favorites, setFavorites] = useLocalStore(favoritesStore);
+  const [recents, setRecents] = useLocalStore(recentsStore);
+  const mounted = useMounted();
 
-  useEffect(() => {
-    setMounted(true);
-    
-    // Load initial values from localStorage
-    const storedFavs = localStorage.getItem("everydaytab_favorites");
-    if (storedFavs) {
-      try {
-        setFavorites(JSON.parse(storedFavs));
-      } catch (e) {
-        console.error("Failed to parse favorites", e);
-      }
-    }
+  const favoriteTools = useMemo(() => (mounted ? resolve(favorites) : []), [favorites, mounted]);
+  const recentTools = useMemo(() => (mounted ? resolve(recents) : []), [recents, mounted]);
 
-    const storedRecents = localStorage.getItem("everydaytab_recents");
-    if (storedRecents) {
-      try {
-        setRecents(JSON.parse(storedRecents));
-      } catch (e) {
-        console.error("Failed to parse recents", e);
-      }
-    }
+  const toggleFavorite = useCallback(
+    (toolId: string) =>
+      setFavorites((prev) => (prev.includes(toolId) ? prev.filter((id) => id !== toolId) : [...prev, toolId])),
+    [setFavorites]
+  );
 
-    // Event listeners for multi-component syncing
-    const handleFavsChange = () => {
-      const updated = localStorage.getItem("everydaytab_favorites");
-      setFavorites(updated !== null ? JSON.parse(updated) : []);
-    };
+  const moveFavorite = useCallback(
+    (toolId: string, direction: -1 | 1) =>
+      setFavorites((prev) => {
+        const i = prev.indexOf(toolId);
+        const j = i + direction;
+        if (i < 0 || j < 0 || j >= prev.length) return prev;
+        const next = [...prev];
+        [next[i], next[j]] = [next[j], next[i]];
+        return next;
+      }),
+    [setFavorites]
+  );
 
-    const handleRecentsChange = () => {
-      const updated = localStorage.getItem("everydaytab_recents");
-      setRecents(updated !== null ? JSON.parse(updated) : []);
-    };
+  const addRecent = useCallback(
+    (toolId: string) => {
+      const limit = settingsStore.get().recentsLimit;
+      setRecents((prev) => [toolId, ...prev.filter((id) => id !== toolId)].slice(0, limit));
+    },
+    [setRecents]
+  );
 
-    window.addEventListener(FAVORITES_CHANGED_EVENT, handleFavsChange);
-    window.addEventListener(RECENTS_CHANGED_EVENT, handleRecentsChange);
+  const removeRecent = useCallback(
+    (toolId: string) => setRecents((prev) => prev.filter((id) => id !== toolId)),
+    [setRecents]
+  );
 
-    return () => {
-      window.removeEventListener(FAVORITES_CHANGED_EVENT, handleFavsChange);
-      window.removeEventListener(RECENTS_CHANGED_EVENT, handleRecentsChange);
-    };
-  }, []);
-
-  const toggleFavorite = (toolId: string) => {
-    let currentFavs: string[] = [];
-    const stored = localStorage.getItem("everydaytab_favorites");
-    if (stored) {
-      try {
-        currentFavs = JSON.parse(stored);
-      } catch (e) {
-        console.error("Failed to parse stored favorites", e);
-      }
-    }
-
-    let nextFavs: string[];
-    if (currentFavs.includes(toolId)) {
-      nextFavs = currentFavs.filter((id) => id !== toolId);
-    } else {
-      nextFavs = [...currentFavs, toolId];
-    }
-    setFavorites(nextFavs);
-    localStorage.setItem("everydaytab_favorites", JSON.stringify(nextFavs));
-    window.dispatchEvent(new CustomEvent(FAVORITES_CHANGED_EVENT));
-  };
-
-  const addRecent = (toolId: string) => {
-    let currentRecents: string[] = [];
-    const stored = localStorage.getItem("everydaytab_recents");
-    if (stored) {
-      try {
-        currentRecents = JSON.parse(stored);
-      } catch (e) {
-        console.error("Failed to parse stored recents", e);
-      }
-    }
-
-    // Keep only the 5 most recent tools and avoid duplicates (move to front)
-    const filtered = currentRecents.filter((id) => id !== toolId);
-    const nextRecents = [toolId, ...filtered].slice(0, 5);
-    setRecents(nextRecents);
-    localStorage.setItem("everydaytab_recents", JSON.stringify(nextRecents));
-    window.dispatchEvent(new CustomEvent(RECENTS_CHANGED_EVENT));
-  };
-
-  const clearRecents = () => {
-    setRecents([]);
-    localStorage.removeItem("everydaytab_recents");
-    window.dispatchEvent(new CustomEvent(RECENTS_CHANGED_EVENT));
-  };
-
-  const favoriteTools = mounted
-    ? favorites.map((id) => getToolById(id)).filter((t): t is Tool => !!t)
-    : [];
-
-  const recentTools = mounted
-    ? recents.map((id) => getToolById(id)).filter((t): t is Tool => !!t)
-    : [];
+  const clearRecents = useCallback(() => setRecents([]), [setRecents]);
+  const clearFavorites = useCallback(() => setFavorites([]), [setFavorites]);
 
   return {
     favorites,
@@ -116,8 +64,11 @@ export function usePersistentTools() {
     recentTools,
     isFavorite: (toolId: string) => favorites.includes(toolId),
     toggleFavorite,
+    moveFavorite,
     addRecent,
+    removeRecent,
     clearRecents,
+    clearFavorites,
     mounted,
   };
 }

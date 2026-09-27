@@ -9,6 +9,7 @@ import {
   markSupportPromptShown,
   shouldShowSupportPrompt,
 } from "@/lib/support";
+import { settingsStore } from "@/hooks/use-settings";
 
 /**
  * Global non-blocking support notice:
@@ -18,12 +19,14 @@ import {
  *  - Slides in from the bottom-right corner. Doesn't dim the page,
  *    doesn't block interaction. User dismisses or clicks the CTA.
  *  - Throttled to once per 3 days via localStorage so it never feels spammy.
+ *  - Can be disabled entirely from Settings → Support.
  */
 export function SupportPrompt() {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
     const handleEvent = () => {
+      if (!settingsStore.get().showSupportPrompt) return;
       if (!shouldShowSupportPrompt()) return;
       // Tiny delay so the user sees their result first.
       window.setTimeout(() => {
@@ -51,7 +54,7 @@ export function SupportPrompt() {
     };
     const originalClick = proto.click;
     if (!proto.__everydaytabPatched) {
-      proto.click = function patchedClick(this: HTMLAnchorElement) {
+      proto.click = function patchedClick(this: HTMLAnchorElement, ...args: []) {
         try {
           // `download` attr present (even empty string) signals a download intent.
           if (this.hasAttribute("download")) {
@@ -60,7 +63,7 @@ export function SupportPrompt() {
         } catch {
           // never block the actual click
         }
-        return originalClick.apply(this, arguments as unknown as []);
+        return originalClick.apply(this, args);
       };
       proto.__everydaytabPatched = true;
     }
@@ -83,26 +86,24 @@ export function SupportPrompt() {
       data-support-prompt
       role="complementary"
       aria-label="Support EverydayTab"
-      className="fixed bottom-5 right-5 z-[90] w-[calc(100%-2.5rem)] sm:w-80 max-w-sm rounded-2xl border border-amber-500/20 bg-background/95 backdrop-blur-md shadow-xl shadow-black/10 p-4 animate-in slide-in-from-bottom-4 fade-in duration-300"
+      className="fixed bottom-16 md:bottom-4 right-4 z-[90] w-[calc(100%-2rem)] sm:w-80 rounded-md bg-popover text-popover-foreground shadow-float p-3.5 animate-in slide-in-from-bottom-2 fade-in duration-200"
     >
       <div className="flex items-start gap-3">
-        <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-amber-500/10 shrink-0">
-          <Heart className="w-4.5 h-4.5 fill-amber-500 text-amber-500" />
+        <div className="flex items-center justify-center w-8 h-8 rounded-md bg-amber-500/10 shrink-0">
+          <Heart className="w-4 h-4 fill-amber-500 text-amber-500" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground leading-tight">
-            Hope that saved you time!
-          </p>
+          <p className="text-sm font-semibold leading-tight">Hope that saved you time!</p>
           <p className="text-xs text-muted-foreground leading-relaxed mt-1">
-            Built solo by {SUPPORT_CONFIG.authorName}. Free, ad-free,
-            processed in your browser. A coffee keeps it free.
+            Built solo by {SUPPORT_CONFIG.authorName}. Free, ad-free, processed in your browser. A coffee keeps it
+            free.
           </p>
         </div>
         <button
           type="button"
           onClick={() => setOpen(false)}
           aria-label="Dismiss"
-          className="text-muted-foreground/60 hover:text-foreground transition-colors h-6 w-6 rounded-lg flex items-center justify-center hover:bg-muted shrink-0"
+          className="text-muted-foreground/60 hover:text-foreground transition-colors h-6 w-6 rounded-sm flex items-center justify-center hover:bg-muted shrink-0 -mt-1 -mr-1"
         >
           <X className="w-3.5 h-3.5" />
         </button>
@@ -114,10 +115,17 @@ export function SupportPrompt() {
           target="_blank"
           rel="noopener noreferrer"
           onClick={() => setOpen(false)}
-          className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-xl font-semibold text-xs bg-[#FF5E5B] text-white hover:bg-[#ff4744] transition-colors active:scale-[0.98]"
+          className="flex-1 inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md font-medium text-xs bg-[#FF5E5B] text-white hover:bg-[#ff4744] transition-colors"
         >
           <Coffee className="w-3.5 h-3.5" />
           Buy me a coffee
+        </a>
+        <a
+          href="/settings#support"
+          onClick={() => setOpen(false)}
+          className="text-[11px] text-muted-foreground hover:text-foreground px-2"
+        >
+          Don&apos;t show
         </a>
       </div>
     </div>

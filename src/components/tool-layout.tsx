@@ -1,14 +1,16 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getToolById, categories } from "@/lib/tools";
+import { ArrowLeft, Check, Link2, Star } from "lucide-react";
+import { getToolById, getCategory, categoryStyle } from "@/lib/tools";
 import { LucideIcon } from "@/components/lucide-icon";
 import { usePersistentTools } from "@/hooks/use-persistent-tools";
+import { useSettings } from "@/hooks/use-settings";
 import { Button } from "@/components/ui/button";
-import { ChevronRight, Share2, Star, ArrowLeft, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 interface ToolLayoutProps {
   toolId: string;
@@ -18,136 +20,87 @@ interface ToolLayoutProps {
 export function ToolLayout({ toolId, children }: ToolLayoutProps) {
   const router = useRouter();
   const { isFavorite, toggleFavorite, addRecent, mounted } = usePersistentTools();
+  const { settings } = useSettings();
   const { toast } = useToast();
-  const [shareCopied, setShareCopied] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  // Find tool metadata
   const tool = getToolById(toolId);
 
   useEffect(() => {
-    if (tool) {
-      // Add tool to recents history when visiting the page
-      addRecent(tool.id);
-    }
+    if (tool) addRecent(tool.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toolId]);
 
   if (!tool) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-16 text-center space-y-4">
-        <h1 className="text-2xl font-bold text-destructive">Tool Not Found</h1>
-        <p className="text-muted-foreground">The requested utility tool does not exist or has been moved.</p>
-        <Button onClick={() => router.push("/")} variant="outline" className="rounded-xl">
-          <ArrowLeft className="w-4 h-4 mr-2" /> Back to Dashboard
+      <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-3">
+        <h1 className="text-lg font-semibold">Tool not found</h1>
+        <p className="text-sm text-muted-foreground">This tool does not exist or has moved.</p>
+        <Button onClick={() => router.push("/")} variant="outline">
+          <ArrowLeft /> Back home
         </Button>
       </div>
     );
   }
 
-  // Find category metadata
-  const category = categories.find((c) => c.id === tool.category);
-  const activeFavorite = mounted && isFavorite(tool.id);
+  const category = getCategory(tool.category);
+  const fav = mounted && isFavorite(tool.id);
 
-  const handleShare = async () => {
-    const url = typeof window !== "undefined" ? window.location.href : "";
+  const share = async () => {
     try {
-      await navigator.clipboard.writeText(url);
-      setShareCopied(true);
-      toast("Tool URL copied to clipboard!", { type: "success", title: "Shared successfully" });
-      setTimeout(() => setShareCopied(false), 2000);
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      toast("Link copied to clipboard", { type: "success" });
+      setTimeout(() => setCopied(false), 1500);
     } catch {
-      toast("Could not copy URL. Please copy it manually.", { type: "error", title: "Copy failed" });
+      toast("Could not copy the link.", { type: "error" });
     }
   };
 
-  const handleToggleFavorite = () => {
-    toggleFavorite(tool.id);
-    const becameFav = !activeFavorite;
-    toast(
-      becameFav
-        ? `Added "${tool.name}" to your favorites!`
-        : `Removed "${tool.name}" from your favorites.`,
-      {
-        type: becameFav ? "success" : "info",
-        title: becameFav ? "Added to Favorites" : "Removed from Favorites",
-      }
-    );
-  };
-
   return (
-    <div className="max-w-7xl mx-auto px-4 pt-2 pb-6 md:pt-3 md:pb-10 space-y-8 text-foreground">
-      {/* Dynamic Breadcrumbs */}
-      <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground/80 overflow-x-auto whitespace-nowrap bg-card/45 border border-border/45 rounded-xl px-3 py-2 w-fit max-w-full">
-        <Link href="/" className="hover:text-primary transition-colors">
-          Home
-        </Link>
-        <ChevronRight className="w-3.5 h-3.5 opacity-60 shrink-0" />
-        {category && (
-          <>
-            <Link href={`/category/${category.id}`} className="hover:text-primary transition-colors">
-              {category.name}
-            </Link>
-            <ChevronRight className="w-3.5 h-3.5 opacity-60 shrink-0" />
-          </>
-        )}
-        <span className="text-foreground font-bold truncate">{tool.name}</span>
-      </nav>
-
-      {/* Tool Header Block */}
-      <div className="rounded-3xl border border-border/45 bg-card/60 backdrop-blur-xl p-5 md:p-6 lg:p-7 space-y-6 shadow-[0_24px_50px_-36px_rgba(15,23,42,0.55)]">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-primary/10 ring-1 ring-primary/20 flex items-center justify-center text-primary shadow-inner shrink-0">
-            <LucideIcon name={tool.icon} className="w-7 h-7" />
-            </div>
-            <div className="space-y-1">
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-2xl md:text-3xl font-black tracking-tight">{tool.name}</h1>
-              </div>
-              <p className="text-sm text-muted-foreground/90 leading-relaxed max-w-2xl">
-                {tool.description}
-              </p>
-            </div>
+    <div
+      className={cn(
+        "px-4 md:px-6 py-5 md:py-6 mx-auto space-y-5",
+        settings.fullWidthTools ? "max-w-none" : "max-w-6xl"
+      )}
+    >
+      <header className="flex items-start gap-3">
+        <span style={categoryStyle(category)} className="cat-chip w-10 h-10 rounded-md flex items-center justify-center shrink-0">
+          <LucideIcon name={tool.icon} className="w-5 h-5" />
+        </span>
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-lg md:text-xl font-semibold tracking-tight leading-tight">{tool.name}</h1>
+            {category && (
+              <Link
+                href={`/category/${category.id}`}
+                className="hidden sm:inline-flex items-center h-5 px-1.5 rounded-sm bg-muted text-[11px] font-medium text-muted-foreground hover:text-foreground"
+              >
+                {category.short}
+              </Link>
+            )}
           </div>
-
-          {/* Action Controls */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            <Button
-              variant="outline"
-              onClick={handleShare}
-              className="rounded-xl border-border/45 bg-background/70 font-bold text-xs h-10 px-4 flex items-center gap-2 hover:bg-muted/45"
-            >
-              {shareCopied ? (
-                <>
-                  <Check className="w-4 h-4 text-green-500" />
-                  Copied Link
-                </>
-              ) : (
-                <>
-                  <Share2 className="w-4 h-4" />
-                  Share
-                </>
-              )}
-            </Button>
-
-            <Button
-              variant="outline"
-              onClick={handleToggleFavorite}
-              className={`rounded-xl border-border/45 bg-background/70 font-bold text-xs h-10 px-4 flex items-center gap-2 transition-all hover:bg-amber-500/5 hover:border-amber-500/20 ${
-                activeFavorite ? "bg-amber-500/5 border-amber-500/30 text-amber-600 dark:text-amber-400" : ""
-              }`}
-            >
-              <Star className={`w-4 h-4 ${activeFavorite ? "fill-amber-400 text-amber-400" : ""}`} />
-              {activeFavorite ? "Favorited" : "Favorite"}
-            </Button>
-          </div>
+          <p className="text-sm text-muted-foreground leading-snug">{tool.description}</p>
         </div>
-      </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <Button variant="outline" size="icon" onClick={share} aria-label="Copy link" title="Copy link">
+            {copied ? <Check className="text-emerald-600" /> : <Link2 />}
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => toggleFavorite(tool.id)}
+            aria-pressed={fav}
+            aria-label={fav ? "Remove from favorites" : "Add to favorites"}
+            title={fav ? "Remove from favorites" : "Add to favorites"}
+            className={cn(fav && "text-amber-500 border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10")}
+          >
+            <Star className={cn(fav && "fill-current")} />
+          </Button>
+        </div>
+      </header>
 
-      {/* Tool Workspace Area */}
-      <div className="w-full">
-        {children}
-      </div>
+      <div className="w-full">{children}</div>
     </div>
   );
 }

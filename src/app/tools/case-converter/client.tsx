@@ -1,191 +1,63 @@
 "use client";
 
-import { ToolLayout } from "@/components/tool-layout";
-
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent } from "@/components/ui/card";
-import { 
-  Type, 
-  Copy, 
-  Check, 
-  Eraser, 
-  ArrowDown01,
-  FileCode,
-  Languages,
-  RefreshCcw
-} from "lucide-react";
+import { ToolLayout } from "@/components/tool-layout";
+import { ClearButton, CodeArea, CopyButton, ToolPanel } from "@/components/tool";
 import { cn } from "@/lib/utils";
+
+const words = (s: string) =>
+  s
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[\s_\-.]+/)
+    .filter(Boolean);
+const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+
+const CONVERSIONS: { label: string; id: string; group: "Standard" | "Developer"; fn: (s: string) => string; mono?: boolean }[] = [
+  { label: "Sentence case", id: "sentence", group: "Standard", fn: (s) => s.toLowerCase().replace(/(^\s*\p{L}|[.!?]\s+\p{L})/gu, (c) => c.toUpperCase()) },
+  { label: "Title Case", id: "title", group: "Standard", fn: (s) => s.split(/(\s+)/).map((w) => (/\s/.test(w) ? w : cap(w))).join("") },
+  { label: "UPPERCASE", id: "upper", group: "Standard", fn: (s) => s.toUpperCase() },
+  { label: "lowercase", id: "lower", group: "Standard", fn: (s) => s.toLowerCase() },
+  { label: "aLtErNaTiNg", id: "alt", group: "Standard", fn: (s) => Array.from(s).map((c, i) => (i % 2 ? c.toUpperCase() : c.toLowerCase())).join("") },
+  { label: "InVeRsE", id: "inv", group: "Standard", fn: (s) => Array.from(s).map((c) => (c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase())).join("") },
+  { label: "camelCase", id: "camel", group: "Developer", mono: true, fn: (s) => words(s).map((w, i) => (i ? cap(w) : w.toLowerCase())).join("") },
+  { label: "PascalCase", id: "pascal", group: "Developer", mono: true, fn: (s) => words(s).map(cap).join("") },
+  { label: "snake_case", id: "snake", group: "Developer", mono: true, fn: (s) => words(s).map((w) => w.toLowerCase()).join("_") },
+  { label: "SCREAMING_SNAKE", id: "screaming", group: "Developer", mono: true, fn: (s) => words(s).map((w) => w.toUpperCase()).join("_") },
+  { label: "kebab-case", id: "kebab", group: "Developer", mono: true, fn: (s) => words(s).map((w) => w.toLowerCase()).join("-") },
+  { label: "dot.case", id: "dot", group: "Developer", mono: true, fn: (s) => words(s).map((w) => w.toLowerCase()).join(".") },
+];
 
 export default function CaseConverter() {
   const [input, setInput] = useState("");
-  const [copiedType, setCopiedType] = useState<string | null>(null);
-
-  const convertCase = (type: string) => {
-    if (!input.trim()) return "";
-    switch (type) {
-      case "uppercase":
-        return input.toUpperCase();
-      case "lowercase":
-        return input.toLowerCase();
-      case "title":
-        return input
-          .toLowerCase()
-          .split(" ")
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" ");
-      case "sentence":
-        return input
-          .toLowerCase()
-          .replace(/(^\s*\w|[.!?]\s+\w)/g, (c) => c.toUpperCase());
-      case "camel":
-        return input
-          .toLowerCase()
-          .split(/[\s_-]+/)
-          .map((word, index) => 
-            index === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1)
-          )
-          .join("");
-      case "pascal":
-        return input
-          .toLowerCase()
-          .split(/[\s_-]+/)
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join("");
-      case "snake":
-        return input
-          .toLowerCase()
-          .split(/[\s-]+/)
-          .join("_");
-      case "kebab":
-        return input
-          .toLowerCase()
-          .split(/[\s_]+/)
-          .join("-");
-      default:
-        return input;
-    }
-  };
-
-  const copyToClipboard = (text: string, type: string) => {
-    if (!text) return;
-    navigator.clipboard.writeText(text);
-    setCopiedType(type);
-    setTimeout(() => setCopiedType(null), 2000);
-  };
-
-  const conversions = [
-    { label: "Sentence Case", type: "sentence", group: "standard" },
-    { label: "Title Case", type: "title", group: "standard" },
-    { label: "UPPERCASE", type: "uppercase", group: "standard" },
-    { label: "lowercase", type: "lowercase", group: "standard" },
-    { label: "camelCase", type: "camel", group: "developer" },
-    { label: "PascalCase", type: "pascal", group: "developer" },
-    { label: "snake_case", type: "snake", group: "developer" },
-    { label: "kebab-case", type: "kebab", group: "developer" },
-  ];
+  const has = input.trim().length > 0;
 
   return (
     <ToolLayout toolId="case-converter">
+      <div className="space-y-3">
+        <ToolPanel title="Text" actions={<ClearButton onClick={() => setInput("")} iconOnly disabled={!input} />}>
+          <CodeArea value={input} onChange={(e) => setInput(e.target.value)} placeholder="Type or paste text…" className="font-sans text-sm" minHeight={140} />
+        </ToolPanel>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-12 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2rem] overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Languages className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Text to Convert</span>
-              </div>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="h-8 rounded-lg hover:text-red-500 font-bold" 
-                onClick={() => setInput("")}
-                disabled={!input}
-              >
-                <Eraser className="w-3.5 h-3.5 mr-2" />
-                Clear
-              </Button>
-            </div>
-            <CardContent className="p-0">
-              <Textarea
-                placeholder="Type or paste your text here..."
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                className="min-h-[200px] p-8 bg-transparent border-none focus-visible:ring-0 resize-none text-lg leading-relaxed placeholder:text-muted-foreground/30"
-              />
-            </CardContent>
-          </Card>
-
-          <div className="space-y-8">
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 px-1">
-                <ArrowDown01 className="w-4 h-4 text-primary" />
-                <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Standard Formats</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {conversions.filter(c => c.group === "standard").map((conv) => (
-                  <Card key={conv.type} className="border-border/40 shadow-lg shadow-primary/5 bg-card/50 backdrop-blur-sm rounded-2xl overflow-hidden group">
-                    <CardContent className="p-4 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{conv.label}</span>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className={cn("h-7 w-7 rounded-lg", copiedType === conv.type && "text-green-500")}
-                          onClick={() => copyToClipboard(convertCase(conv.type), conv.type)}
-                          disabled={!input}
-                        >
-                          {copiedType === conv.type ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                        </Button>
-                      </div>
-                      <div className="bg-muted/30 rounded-xl p-3 min-h-[60px] flex items-center border border-transparent group-hover:border-primary/10 transition-colors">
-                        <p className="text-sm font-medium line-clamp-2 break-all">
-                          {convertCase(conv.type) || <span className="opacity-20 italic">Waiting...</span>}
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 px-1">
-                <FileCode className="w-4 h-4 text-primary" />
-                <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Developer Formats</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {conversions.filter(c => c.group === "developer").map((conv) => (
-                  <Card key={conv.type} className="border-border/40 shadow-lg shadow-primary/5 bg-card/50 backdrop-blur-sm rounded-2xl overflow-hidden group">
-                    <CardContent className="p-4 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground font-mono">{conv.label}</span>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className={cn("h-7 w-7 rounded-lg", copiedType === conv.type && "text-green-500")}
-                          onClick={() => copyToClipboard(convertCase(conv.type), conv.type)}
-                          disabled={!input}
-                        >
-                          {copiedType === conv.type ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                        </Button>
-                      </div>
-                      <div className="bg-muted/30 rounded-xl p-3 min-h-[60px] flex items-center border border-transparent group-hover:border-primary/10 transition-colors">
-                        <p className="text-sm font-mono break-all line-clamp-2">
-                          {convertCase(conv.type) || <span className="opacity-20 italic">Waiting...</span>}
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+        {(["Standard", "Developer"] as const).map((group) => (
+          <ToolPanel key={group} title={group}>
+            <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 divide-y divide-border md:divide-y-0 md:[&>li]:border-b md:[&>li]:border-r md:[&>li:nth-child(2n)]:border-r-0 xl:[&>li:nth-child(2n)]:border-r xl:[&>li:nth-child(3n)]:border-r-0 [&>li]:border-border">
+              {CONVERSIONS.filter((c) => c.group === group).map((c) => {
+                const out = has ? c.fn(input) : "";
+                return (
+                  <li key={c.id} className="group px-3.5 py-2.5 space-y-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={cn("text-[11px] font-semibold text-muted-foreground", c.mono && "font-mono")}>{c.label}</span>
+                      <span className="flex-1" />
+                      <CopyButton text={out} iconOnly className={cn("h-6 w-6", !out && "invisible")} />
+                    </div>
+                    <p className={cn("text-[13px] break-words line-clamp-3 leading-relaxed", c.mono && "font-mono", !out && "text-muted-foreground/50")}>{out || "—"}</p>
+                  </li>
+                );
+              })}
+            </ul>
+          </ToolPanel>
+        ))}
       </div>
     </ToolLayout>
   );
 }
-

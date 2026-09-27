@@ -75,41 +75,36 @@ function ToasterContainer({ toasts, dismiss }: { toasts: Toast[]; dismiss: (id: 
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed bottom-5 right-5 z-[100] flex flex-col gap-3 max-w-md w-full pointer-events-none px-4 sm:px-0">
+    <div className="fixed bottom-16 md:bottom-4 right-4 z-[100] flex flex-col gap-2 w-[calc(100%-2rem)] sm:w-80 pointer-events-none">
       {toasts.map((t) => {
         let Icon = Info;
-        let iconColor = "text-blue-500 bg-blue-500/10";
+        let iconColor = "text-sky-600 dark:text-sky-400";
         if (t.type === "success") {
           Icon = CheckCircle;
-          iconColor = "text-green-500 bg-green-500/10";
+          iconColor = "text-emerald-600 dark:text-emerald-400";
         } else if (t.type === "error") {
           Icon = AlertCircle;
-          iconColor = "text-red-500 bg-red-500/10";
+          iconColor = "text-destructive";
         } else if (t.type === "warning") {
           Icon = AlertTriangle;
-          iconColor = "text-amber-500 bg-amber-500/10";
+          iconColor = "text-amber-600 dark:text-amber-400";
         }
 
         return (
           <div
             key={t.id}
-            className="pointer-events-auto flex gap-3 p-4 rounded-2xl border border-border/40 bg-background/95 backdrop-blur-md shadow-xl shadow-black/5 animate-in slide-in-from-bottom duration-300 transition-all select-none"
+            className="pointer-events-auto flex items-start gap-2.5 px-3 py-2.5 rounded-md bg-popover text-popover-foreground shadow-float animate-in slide-in-from-bottom-2 fade-in duration-200 select-none"
             role="alert"
           >
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${iconColor}`}>
-              <Icon className="w-5 h-5" />
+            <Icon className={`w-4 h-4 mt-px shrink-0 ${iconColor}`} />
+            <div className="flex-1 min-w-0">
+              {t.title && <p className="text-xs font-semibold text-foreground leading-tight">{t.title}</p>}
+              <p className="text-xs text-muted-foreground leading-relaxed">{t.description}</p>
             </div>
-            
-            <div className="flex-1 min-w-0 pr-2">
-              {t.title && <p className="text-xs font-bold text-foreground mb-0.5">{t.title}</p>}
-              <p className="text-xs text-muted-foreground font-medium leading-relaxed">
-                {t.description}
-              </p>
-            </div>
-
             <button
               onClick={() => dismiss(t.id)}
-              className="text-muted-foreground/60 hover:text-foreground transition-colors h-6 w-6 rounded-lg flex items-center justify-center hover:bg-muted shrink-0 cursor-pointer"
+              aria-label="Dismiss"
+              className="text-muted-foreground/60 hover:text-foreground transition-colors h-5 w-5 rounded-sm flex items-center justify-center hover:bg-muted shrink-0 cursor-pointer -mr-1"
             >
               <X className="w-3.5 h-3.5" />
             </button>

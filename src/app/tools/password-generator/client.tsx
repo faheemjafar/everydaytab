@@ -1,258 +1,172 @@
 "use client";
 
+import { useMemo, useState } from "react";
+import { RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Slider } from "@/components/ui/slider";
-import { 
-  Copy, 
-  Check, 
-  RefreshCw, 
-  Shield, 
-  ShieldCheck, 
-  ShieldAlert,
-  Settings2,
-  Lock
-} from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { CopyButton, Field, OptionsLayout, PrivacyNote, Segmented, ToolPanel } from "@/components/tool";
 import { cn } from "@/lib/utils";
+
+const SETS = {
+  upper: { label: "Uppercase", sub: "A–Z", chars: "ABCDEFGHIJKLMNOPQRSTUVWXYZ" },
+  lower: { label: "Lowercase", sub: "a–z", chars: "abcdefghijklmnopqrstuvwxyz" },
+  digits: { label: "Numbers", sub: "0–9", chars: "0123456789" },
+  symbols: { label: "Symbols", sub: "!@#$%…", chars: "!@#$%^&*()_+-=[]{}|;:,.<>?" },
+} as const;
+type SetKey = keyof typeof SETS;
+const AMBIGUOUS = /[Il1O0o|`'"]/g;
+
+function generate(length: number, sets: Set<SetKey>, excludeAmbiguous: boolean): string {
+  let chars = Array.from(sets)
+    .map((k) => SETS[k].chars)
+    .join("");
+  if (excludeAmbiguous) chars = chars.replace(AMBIGUOUS, "");
+  if (!chars) return "";
+  const arr = new Uint32Array(length);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, (n) => chars[n % chars.length]).join("");
+}
+
+function entropyBits(length: number, sets: Set<SetKey>, excludeAmbiguous: boolean) {
+  let chars = Array.from(sets).map((k) => SETS[k].chars).join("");
+  if (excludeAmbiguous) chars = chars.replace(AMBIGUOUS, "");
+  return chars.length ? Math.round(length * Math.log2(chars.length)) : 0;
+}
+
+function strength(bits: number) {
+  if (bits < 40) return { label: "Very weak", tone: "bg-destructive", pct: 15 };
+  if (bits < 60) return { label: "Weak", tone: "bg-orange-500", pct: 35 };
+  if (bits < 80) return { label: "Fair", tone: "bg-amber-500", pct: 55 };
+  if (bits < 110) return { label: "Strong", tone: "bg-emerald-500", pct: 80 };
+  return { label: "Very strong", tone: "bg-primary", pct: 100 };
+}
 
 export default function PasswordGenerator() {
   const [length, setLength] = useState(20);
-  const [includeUppercase, setIncludeUppercase] = useState(true);
-  const [includeLowercase, setIncludeLowercase] = useState(true);
-  const [includeNumbers, setIncludeNumbers] = useState(true);
-  const [includeSymbols, setIncludeSymbols] = useState(true);
-  const [password, setPassword] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [sets, setSets] = useState<Set<SetKey>>(new Set(["upper", "lower", "digits", "symbols"]));
+  const [excludeAmbiguous, setExcludeAmbiguous] = useState(false);
+  const [count, setCount] = useState<"1" | "5" | "10">("1");
+  // Regenerated whenever an option changes; seed bumps on "Regenerate".
+  const [seed, setSeed] = useState(0);
+  const passwords = useMemo(
+    () => Array.from({ length: Number(count) }, () => generate(length, sets, excludeAmbiguous)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [length, sets, excludeAmbiguous, count, seed]
+  );
+  const regenerate = () => setSeed((s) => s + 1);
 
-  const generatePassword = useCallback(() => {
-    const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const lowercase = "abcdefghijklmnopqrstuvwxyz";
-    const numbers = "0123456789";
-    const symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
+  const toggleSet = (k: SetKey) =>
+    setSets((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) {
+        if (next.size === 1) return prev;
+        next.delete(k);
+      } else next.add(k);
+      return next;
+    });
 
-    let chars = "";
-    if (includeUppercase) chars += uppercase;
-    if (includeLowercase) chars += lowercase;
-    if (includeNumbers) chars += numbers;
-    if (includeSymbols) chars += symbols;
+  const bits = entropyBits(length, sets, excludeAmbiguous);
+  const s = strength(bits);
 
-    if (chars === "") {
-      setPassword("");
-      return;
-    }
+  const options = (
+    <ToolPanel title="Options" bodyClassName="p-3 space-y-4">
+      <Field label={`Length — ${length}`}>
+        <Slider min={4} max={128} step={1} value={[length]} onValueChange={(v) => setLength(v[0])} />
+        <div className="flex gap-1 mt-2">
+          {[12, 16, 24, 32, 64].map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setLength(v)}
+              className={cn(
+                "flex-1 h-6 rounded-sm text-[11px] font-mono border transition-colors",
+                length === v ? "border-foreground bg-muted" : "border-border text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+      </Field>
 
-    let result = "";
-    const array = new Uint32Array(length);
-    window.crypto.getRandomValues(array);
-    
-    for (let i = 0; i < length; i++) {
-      result += chars.charAt(array[i] % chars.length);
-    }
-    setPassword(result);
-  }, [length, includeUppercase, includeLowercase, includeNumbers, includeSymbols]);
+      <div className="space-y-2.5">
+        {(Object.keys(SETS) as SetKey[]).map((k) => (
+          <Field key={k} label={SETS[k].label} hint={SETS[k].sub} inline>
+            <Switch checked={sets.has(k)} onCheckedChange={() => toggleSet(k)} />
+          </Field>
+        ))}
+        <Field label="Exclude ambiguous" hint="I l 1 O 0 o | ` ' &quot;" inline>
+          <Switch checked={excludeAmbiguous} onCheckedChange={setExcludeAmbiguous} />
+        </Field>
+      </div>
 
-  const copyToClipboard = () => {
-    if (!password) return;
-    navigator.clipboard.writeText(password);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  useEffect(() => {
-    generatePassword();
-  }, [generatePassword]);
-
-  const getStrength = () => {
-    if (length < 8) return { label: "Very Weak", color: "text-red-500", icon: ShieldAlert, width: "20%" };
-    if (length < 12) return { label: "Weak", color: "text-orange-500", icon: ShieldAlert, width: "40%" };
-    
-    let varietyCount = 0;
-    if (includeUppercase) varietyCount++;
-    if (includeLowercase) varietyCount++;
-    if (includeNumbers) varietyCount++;
-    if (includeSymbols) varietyCount++;
-
-    if (length < 16 || varietyCount < 3) return { label: "Moderate", color: "text-yellow-500", icon: Shield, width: "60%" };
-    if (length < 24 || varietyCount < 4) return { label: "Strong", color: "text-green-500", icon: ShieldCheck, width: "85%" };
-    return { label: "Unbreakable", color: "text-indigo-500", icon: ShieldCheck, width: "100%" };
-  };
-
-  const strength = getStrength();
+      <Field label="How many" inline>
+        <Segmented
+          size="sm"
+          value={count}
+          onChange={setCount}
+          options={[
+            { value: "1", label: "1" },
+            { value: "5", label: "5" },
+            { value: "10", label: "10" },
+          ]}
+        />
+      </Field>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="password-generator">
-
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 items-start">
-        <div className="lg:col-span-3 space-y-6">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/50 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="relative group">
-                <Input
-                  readOnly
-                  value={password || "Select options below"}
-                  className={cn(
-                    "h-20 text-2xl font-mono text-center tracking-wider bg-muted/30 border-2 border-dashed transition-all",
-                    password ? "border-primary/20" : "border-muted text-muted-foreground"
-                  )}
-                />
-                {password && (
-                  <div className="absolute inset-y-0 right-3 flex items-center gap-2">
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="rounded-xl hover:bg-background transition-colors"
-                      onClick={generatePassword}
-                    >
-                      <RefreshCw className="w-5 h-5 text-muted-foreground" />
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center justify-between gap-4">
-                <Button 
-                  onClick={copyToClipboard} 
-                  disabled={!password}
-                  className={cn(
-                    "flex-1 h-14 rounded-2xl text-lg font-bold transition-all shadow-lg",
-                    copied ? "bg-green-500 hover:bg-green-600 shadow-green-500/20" : "bg-primary hover:bg-primary/90 shadow-primary/20"
-                  )}
-                >
-                  {copied ? (
-                    <span className="flex items-center gap-2">
-                      <Check className="w-5 h-5" /> Copied!
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-2">
-                      <Copy className="w-5 h-5" /> Copy Password
-                    </span>
-                  )}
-                </Button>
-              </div>
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <strength.icon className={cn("w-5 h-5", strength.color)} />
-                    <span className={cn("text-sm font-bold uppercase tracking-wider", strength.color)}>
-                      {strength.label}
-                    </span>
-                  </div>
-                  <span className="text-xs text-muted-foreground font-medium">Security Score</span>
-                </div>
-                <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                  <div 
-                    className={cn("h-full transition-all duration-500 ease-out bg-current", strength.color)}
-                    style={{ width: strength.width }}
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="grid grid-cols-2 gap-4">
-            {[16, 24, 32, 64].map((v) => (
-              <Button
-                key={v}
-                variant="outline"
-                className={cn(
-                  "h-12 rounded-xl border-border/50 font-mono transition-all",
-                  length === v ? "bg-primary/10 text-primary border-primary/20" : "hover:bg-muted"
-                )}
-                onClick={() => setLength(v)}
-              >
-                {v} chars
+      <OptionsLayout options={options}>
+        <ToolPanel
+          title="Password"
+          actions={
+            <>
+              <Button variant="ghost" size="sm" onClick={regenerate}>
+                <RefreshCw /> Regenerate
               </Button>
+              <CopyButton text={passwords.join("\n")} label={passwords.length > 1 ? "Copy all" : "Copy"} />
+            </>
+          }
+          footer={
+            <div className="flex items-center gap-3 w-full">
+              <div className="flex items-center gap-1.5 text-xs font-medium">
+                {bits < 60 ? <ShieldAlert className="w-3.5 h-3.5 text-destructive" /> : <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />}
+                {s.label}
+              </div>
+              <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden max-w-48">
+                <div className={cn("h-full rounded-full transition-all", s.tone)} style={{ width: `${s.pct}%` }} />
+              </div>
+              <span className="text-[11px] text-muted-foreground tabular-nums">{bits} bits</span>
+              <span className="flex-1" />
+              <PrivacyNote>Generated with crypto.getRandomValues — never leaves this tab.</PrivacyNote>
+            </div>
+          }
+        >
+          <ul className="divide-y divide-border">
+            {passwords.map((p, i) => (
+              <li key={i} className="group flex items-center gap-3 px-3.5 min-h-12 py-2">
+                <code className={cn("flex-1 font-mono break-all leading-relaxed", passwords.length === 1 ? "text-lg" : "text-sm")}>
+                  {Array.from(p).map((ch, j) => (
+                    <span
+                      key={j}
+                      className={cn(
+                        /\d/.test(ch) && "text-sky-600 dark:text-sky-400",
+                        /[^A-Za-z0-9]/.test(ch) && "text-rose-600 dark:text-rose-400"
+                      )}
+                    >
+                      {ch}
+                    </span>
+                  ))}
+                </code>
+                <CopyButton text={p} iconOnly className={cn(passwords.length > 1 && "opacity-0 group-hover:opacity-100")} />
+              </li>
             ))}
-          </div>
-        </div>
-
-        <Card className="lg:col-span-2 border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-xl rounded-3xl">
-          <CardContent className="p-8 space-y-8">
-            <div className="flex items-center gap-3">
-              <Settings2 className="w-5 h-5 text-primary" />
-              <h3 className="font-bold text-lg">Configuration</h3>
-            </div>
-
-            <div className="space-y-6">
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <Label htmlFor="length" className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Length</Label>
-                  <span className="text-2xl font-mono font-bold text-primary">{length}</span>
-                </div>
-                <Slider
-                  id="length"
-                  min={4}
-                  max={128}
-                  step={1}
-                  value={[length]}
-                  onValueChange={(value) => setLength(value[0])}
-                  className="py-4"
-                />
-              </div>
-
-              <div className="space-y-3 pt-2">
-                {[
-                  { id: "uppercase", checked: includeUppercase, set: setIncludeUppercase, label: "Uppercase", sub: "A-Z" },
-                  { id: "lowercase", checked: includeLowercase, set: setIncludeLowercase, label: "Lowercase", sub: "a-z" },
-                  { id: "numbers", checked: includeNumbers, set: setIncludeNumbers, label: "Numbers", sub: "0-9" },
-                  { id: "symbols", checked: includeSymbols, set: setIncludeSymbols, label: "Symbols", sub: "!@#$" },
-                ].map((opt) => (
-                  <div 
-                    key={opt.id}
-                    className="flex items-center justify-between p-4 rounded-2xl bg-muted/30 border border-transparent hover:border-border/50 transition-colors cursor-pointer group"
-                    onClick={() => opt.set(!opt.checked)}
-                  >
-                    <div className="flex flex-col">
-                      <Label className="font-bold pointer-events-none">{opt.label}</Label>
-                      <span className="text-[10px] text-muted-foreground font-mono uppercase">{opt.sub}</span>
-                    </div>
-                    <Checkbox
-                      id={opt.id}
-                      checked={opt.checked}
-                      onCheckedChange={(checked) => opt.set(checked === true)}
-                      className="rounded-lg h-6 w-6"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="bg-primary/5 rounded-3xl p-8 border border-primary/10">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="space-y-2">
-            <h4 className="font-bold flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-primary" /> 
-              Client-Side Only
-            </h4>
-            <p className="text-sm text-muted-foreground">Passwords are generated in your browser and never sent to our servers.</p>
-          </div>
-          <div className="space-y-2">
-            <h4 className="font-bold flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-primary" /> 
-              Secure Randomness
-            </h4>
-            <p className="text-sm text-muted-foreground">Uses the window.crypto API for cryptographically strong random values.</p>
-          </div>
-          <div className="space-y-2">
-            <h4 className="font-bold flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-primary" /> 
-              Privacy First
-            </h4>
-            <p className="text-sm text-muted-foreground">No tracking, no analytics, no cookies. Your data stays on your machine.</p>
-          </div>
-        </div>
-      </div>
+          </ul>
+        </ToolPanel>
+      </OptionsLayout>
     </ToolLayout>
   );
 }
-

@@ -2,15 +2,12 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
-import { Header } from "@/components/header";
-import { Sidebar } from "@/components/sidebar";
+import { AppShell } from "@/components/shell/app-shell";
 import { CommandPalette } from "@/components/command-palette";
 import { SupportPrompt } from "@/components/support-prompt";
 import { ToastProvider } from "@/hooks/use-toast";
-import { Suspense } from "react";
-import Link from "next/link";
-import { ArrowRight, Sparkles } from "lucide-react";
 import { ThemeProvider } from "@/components/theme-provider";
+import { SETTINGS_BOOT_SCRIPT } from "@/lib/settings";
 import { StatCounter } from "@statcounter/nextjs";
 
 const WEBSITE_JSON_LD = {
@@ -174,7 +171,10 @@ export default function RootLayout({
       suppressHydrationWarning
       data-scroll-behavior="smooth"
     >
-      <body className="min-h-full flex flex-row">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: SETTINGS_BOOT_SCRIPT }} />
+      </head>
+      <body className="min-h-full">
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
@@ -188,81 +188,9 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <ToastProvider>
-            <Suspense fallback={<div className="w-72 hidden lg:block h-screen border-r border-border/40" />}>
-              <Sidebar />
-            </Suspense>
-            
             <CommandPalette />
             <SupportPrompt />
-
-            <div className="flex-1 flex flex-col min-h-screen relative">
-              <Header />
-              <main className="flex-1">{children}</main>
-
-              <footer className="mt-auto border-t border-border/60 bg-background">
-                <div className="container mx-auto px-4 md:px-6 py-10 md:py-14 space-y-10">
-                  <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr_1fr] gap-10">
-                    <div className="space-y-4 max-w-md">
-                      <Link href="/" className="flex items-center gap-2 group">
-                        <div className="flex items-center justify-center w-9 h-9 rounded-lg overflow-hidden ring-1 ring-border">
-                          <img src="/logo.svg" alt="EverydayTab" className="w-full h-full" />
-                        </div>
-                        <span className="font-bold text-lg tracking-tight">EverydayTab</span>
-                      </Link>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        A fast, privacy-first toolkit with 100+ browser-powered utilities built for developers, creators, and everyday workflows.
-                      </p>
-
-                      <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-                        <span className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1">
-                          <Sparkles className="w-3 h-3 text-primary" />
-                          No signup
-                        </span>
-                        <span className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1">
-                          In-browser processing
-                        </span>
-                        <span className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1">
-                          Free forever
-                        </span>
-                      </div>
-                    </div>
-
-                    <div>
-                      <h3 className="font-semibold text-sm mb-3.5">Popular Categories</h3>
-                      <ul className="space-y-2 text-sm text-muted-foreground">
-                        <li><Link href="/category/developer" className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">Developer Tools <ArrowRight className="w-3 h-3" /></Link></li>
-                        <li><Link href="/category/text" className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">Text Utilities <ArrowRight className="w-3 h-3" /></Link></li>
-                        <li><Link href="/category/converter" className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">Converters <ArrowRight className="w-3 h-3" /></Link></li>
-                        <li><Link href="/category/security" className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">Security Tools <ArrowRight className="w-3 h-3" /></Link></li>
-                      </ul>
-                    </div>
-
-                    <div>
-                      <h3 className="font-semibold text-sm mb-3.5">Resources</h3>
-                      <ul className="space-y-2 text-sm text-muted-foreground">
-                        <li><Link href="/" className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">All Tools <ArrowRight className="w-3 h-3" /></Link></li>
-                        <li><Link href="/privacy" className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">Privacy Policy <ArrowRight className="w-3 h-3" /></Link></li>
-                        <li><Link href="/terms" className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">Terms of Service <ArrowRight className="w-3 h-3" /></Link></li>
-                        <li><Link href="https://github.com/faheemjafar/everydaytab" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors">Open Source GitHub <ArrowRight className="w-3 h-3" /></Link></li>
-                      </ul>
-                    </div>
-                  </div>
-
-                  <div className="pt-6 border-t border-border/60 flex flex-col md:flex-row items-center justify-between gap-4">
-                    <p className="text-xs text-muted-foreground text-center md:text-left">
-                      © 2026 EverydayTab. All rights reserved.
-                    </p>
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground font-medium">
-                      <span className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        All Systems Operational
-                      </span>
-                      <span className="rounded-md border border-border px-2 py-1">v1.0.0</span>
-                    </div>
-                  </div>
-                </div>
-              </footer>
-            </div>
+            <AppShell>{children}</AppShell>
           </ToastProvider>
         </ThemeProvider>
         <StatCounter project_id={13248196} security_code="282a098d" />

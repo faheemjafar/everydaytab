@@ -1,91 +1,163 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { ToolLayout } from "@/components/tool-layout";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Play, Copy, CheckCircle2, BookOpen, AlertCircle, Settings2, Flag, Zap } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { CodeArea, CopyButton, Field, OptionsLayout, StatusBadge, ToolAlert, ToolPanel } from "@/components/tool";
 import { cn } from "@/lib/utils";
 
 interface RegexPattern { name: string; pattern: string; description: string; }
 
 const commonPatterns: RegexPattern[] = [
-  { name: "Email Address", pattern: "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b", description: "Matches standard email formats" },
-  { name: "Phone (US)", pattern: "(?:\\+?1[-.\\s]?)?\\(?(?:\\d{3})\\)?[-.\\s]?(?:\\d{3})[-.\\s]?(?:\\d{4})", description: "Matches US phone number variants" },
-  { name: "URL", pattern: "https?:\\/\\/(www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b([-a-zA-Z0-9()@:%_\\+.~#?&//=]*)", description: "Matches HTTP/HTTPS web links" },
-  { name: "IPv4 Address", pattern: "(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)", description: "Matches IPv4 addresses" },
-  { name: "Hex Color", pattern: "#(?:[0-9a-fA-F]{3}){1,2}\\b", description: "Matches CSS hex colors" },
-  { name: "Date (YYYY-MM-DD)", pattern: "\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])", description: "Matches ISO dates" },
+  { name: "Email address", pattern: "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b", description: "Standard email formats" },
+  { name: "Phone (US)", pattern: "(?:\\+?1[-.\\s]?)?\\(?(?:\\d{3})\\)?[-.\\s]?(?:\\d{3})[-.\\s]?(?:\\d{4})", description: "US phone number variants" },
+  { name: "URL", pattern: "https?:\\/\\/(www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b([-a-zA-Z0-9()@:%_\\+.~#?&//=]*)", description: "HTTP/HTTPS links" },
+  { name: "IPv4 address", pattern: "(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)", description: "Dotted-quad IPv4" },
+  { name: "Hex color", pattern: "#(?:[0-9a-fA-F]{3}){1,2}\\b", description: "CSS hex colors" },
+  { name: "Date (YYYY-MM-DD)", pattern: "\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])", description: "ISO 8601 dates" },
 ];
+
+const FLAGS = [
+  { key: "g", label: "Global", hint: "Find all matches" },
+  { key: "i", label: "Ignore case" },
+  { key: "m", label: "Multiline", hint: "^ and $ match line boundaries" },
+  { key: "s", label: "Dot all", hint: ". matches newlines" },
+] as const;
 
 export default function RegexTester() {
   const [pattern, setPattern] = useState("");
   const [text, setText] = useState("");
-  const [matches, setMatches] = useState<string[]>([]);
-  const [error, setError] = useState("");
-  const [caseSensitive, setCaseSensitive] = useState(false);
-  const [globalFlag, setGlobalFlag] = useState(true);
+  const [flags, setFlags] = useState<Set<string>>(new Set(["g"]));
 
-  useEffect(() => {
-    setError("");
-    setMatches([]);
-    if (!pattern || !text) return;
+  const flagStr = FLAGS.map((f) => f.key).filter((k) => flags.has(k)).join("");
+
+  const result = useMemo(() => {
+    if (!pattern) return { matches: [] as RegExpMatchArray[], error: "" };
     try {
-      const flags = (globalFlag ? "g" : "") + (caseSensitive ? "" : "i");
-      const regex = new RegExp(pattern, flags);
-      const found = text.match(regex);
-      setMatches(found || []);
-    } catch (err) { setError("Invalid regular expression"); }
-  }, [pattern, text, caseSensitive, globalFlag]);
+      const re = new RegExp(pattern, flagStr.includes("g") ? flagStr : flagStr + "g");
+      const matches = Array.from(text.matchAll(re)).filter((m) => m[0] !== "" || true);
+      return { matches: flagStr.includes("g") ? matches : matches.slice(0, 1), error: "" };
+    } catch (e) {
+      return { matches: [], error: (e as Error).message.replace(/^Invalid regular expression: /, "") };
+    }
+  }, [pattern, text, flagStr]);
 
-  const copyToClipboard = async (content: string) => { try { await navigator.clipboard.writeText(content); } catch (err) { console.error(err); } };
+  // Highlighted preview of the test string.
+  const highlighted = useMemo(() => {
+    if (!text || result.matches.length === 0) return null;
+    const parts: React.ReactNode[] = [];
+    let last = 0;
+    result.matches.forEach((m, i) => {
+      const start = m.index ?? 0;
+      const end = start + m[0].length;
+      if (start < last) return;
+      parts.push(text.slice(last, start));
+      parts.push(
+        <mark key={i} className="bg-primary/20 text-foreground rounded-xs px-px">
+          {m[0] || "∅"}
+        </mark>
+      );
+      last = end;
+    });
+    parts.push(text.slice(last));
+    return parts;
+  }, [text, result.matches]);
+
+  const toggleFlag = (k: string) =>
+    setFlags((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+
+  const options = (
+    <>
+      <ToolPanel title="Flags" bodyClassName="p-3 space-y-3">
+        {FLAGS.map((f) => (
+          <Field key={f.key} label={<span>{f.label} <code className="text-muted-foreground">/{f.key}</code></span>} hint={"hint" in f ? f.hint : undefined} inline>
+            <Switch checked={flags.has(f.key)} onCheckedChange={() => toggleFlag(f.key)} />
+          </Field>
+        ))}
+      </ToolPanel>
+      <ToolPanel title="Common patterns">
+        <ul className="divide-y divide-border">
+          {commonPatterns.map((p) => (
+            <li key={p.name}>
+              <button
+                type="button"
+                onClick={() => setPattern(p.pattern)}
+                className={cn("w-full text-left px-3 py-2 hover:bg-muted/60 transition-colors", pattern === p.pattern && "bg-accent/50")}
+              >
+                <p className="text-[13px] font-medium">{p.name}</p>
+                <p className="text-[11px] text-muted-foreground">{p.description}</p>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </ToolPanel>
+    </>
+  );
 
   return (
     <ToolLayout toolId="regex">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-8 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center gap-3"><Play className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Regular Expression</span></div>
-            <CardContent className="p-8">
-              <Input type="text" value={pattern} onChange={(e) => setPattern(e.target.value)} placeholder="Enter regex pattern..." className="h-14 px-5 bg-muted/30 border-transparent rounded-2xl focus:border-primary/20 text-sm font-mono font-bold" />
-            </CardContent>
-          </Card>
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center gap-3"><BookOpen className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Test String</span></div>
-            <CardContent className="p-8">
-              <Textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Enter text to test against the pattern..." rows={8} className="w-full px-4 py-4 bg-muted/30 border-transparent rounded-2xl focus:border-primary/20 text-sm font-medium text-foreground resize-none placeholder:font-normal" />
-            </CardContent>
-          </Card>
-          {matches.length > 0 && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center gap-3"><CheckCircle2 className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Matches ({matches.length})</span></div>
-              <CardContent className="p-8 space-y-2">
-                {matches.map((match, i) => (<div key={i} className="flex items-center justify-between p-4 bg-muted/30 rounded-xl border border-border hover:border-primary/20 transition-all"><code className="text-sm font-mono text-foreground">{match}</code><Button onClick={() => copyToClipboard(match)} variant="ghost" size="sm" className="rounded-lg"><Copy className="w-4 h-4" /></Button></div>))}
-              </CardContent>
-            </Card>
-          )}
-          {error && (<div className="flex items-center gap-3 p-4 rounded-2xl bg-red-50 border border-red-200 text-red-600 text-sm font-bold"><AlertCircle className="w-5 h-5 flex-shrink-0" />{error}</div>)}
-        </div>
+      <OptionsLayout options={options}>
+        <ToolPanel
+          title="Pattern"
+          actions={
+            result.error ? (
+              <StatusBadge tone="error">Invalid</StatusBadge>
+            ) : pattern ? (
+              <StatusBadge tone={result.matches.length ? "success" : "neutral"}>
+                {result.matches.length} match{result.matches.length === 1 ? "" : "es"}
+              </StatusBadge>
+            ) : null
+          }
+          bodyClassName="p-2"
+        >
+          <div className="flex items-center gap-1 font-mono text-sm">
+            <span className="text-muted-foreground pl-1.5">/</span>
+            <Input
+              value={pattern}
+              onChange={(e) => setPattern(e.target.value)}
+              placeholder="[a-z]+"
+              spellCheck={false}
+              className="font-mono text-sm h-9 border-0 bg-transparent px-1 focus-visible:ring-0 dark:bg-transparent"
+            />
+            <span className="text-muted-foreground pr-1.5">/{flagStr}</span>
+            <CopyButton text={pattern ? `/${pattern}/${flagStr}` : ""} iconOnly />
+          </div>
+        </ToolPanel>
 
-        <div className="lg:col-span-4 space-y-6 sticky top-24">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><Settings2 className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Common Patterns</span></div>
-            <CardContent className="p-6 space-y-2">
-              {commonPatterns.map((p) => (<button key={p.name} onClick={() => setPattern(p.pattern)} className="w-full text-left p-4 bg-muted/30 border border-border rounded-xl text-sm font-bold text-foreground hover:bg-primary/5 hover:border-primary/30 transition-all"><div className="text-sm font-bold">{p.name}</div><div className="text-xs text-muted-foreground font-medium mt-1">{p.description}</div></button>))}
-            </CardContent>
-          </Card>
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><Flag className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Flags</span></div>
-            <CardContent className="p-6 space-y-3">
-              <label className="flex items-center cursor-pointer gap-3 p-3 bg-muted/30 rounded-xl border border-border"><input type="checkbox" checked={globalFlag} onChange={(e) => setGlobalFlag(e.target.checked)} className="w-5 h-5 accent-primary" /><span className="text-sm font-medium">Global (g)</span></label>
-              <label className="flex items-center cursor-pointer gap-3 p-3 bg-muted/30 rounded-xl border border-border"><input type="checkbox" checked={caseSensitive} onChange={(e) => setCaseSensitive(e.target.checked)} className="w-5 h-5 accent-primary" /><span className="text-sm font-medium">Case sensitive</span></label>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+        {result.error && <ToolAlert tone="error">{result.error}</ToolAlert>}
+
+        <ToolPanel title="Test string">
+          <CodeArea value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste text to test against…" minHeight={200} />
+        </ToolPanel>
+
+        {highlighted && (
+          <ToolPanel title="Highlighted">
+            <pre className="px-3.5 py-3 font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-words">{highlighted}</pre>
+          </ToolPanel>
+        )}
+
+        {result.matches.length > 0 && (
+          <ToolPanel title={`Matches · ${result.matches.length}`} actions={<CopyButton getText={() => result.matches.map((m) => m[0]).join("\n")} label="Copy all" />}>
+            <ul className="divide-y divide-border max-h-80 overflow-y-auto custom-scrollbar">
+              {result.matches.slice(0, 500).map((m, i) => (
+                <li key={i} className="flex items-center gap-3 px-3 py-1.5 text-[13px] font-mono group">
+                  <span className="w-6 text-[11px] text-muted-foreground tabular-nums text-right">{i + 1}</span>
+                  <span className="flex-1 truncate">{m[0] || <span className="text-muted-foreground">(empty)</span>}</span>
+                  <span className="text-[11px] text-muted-foreground tabular-nums">@{m.index}</span>
+                  {m.length > 1 && <span className="text-[11px] text-muted-foreground">{m.length - 1} group{m.length > 2 ? "s" : ""}</span>}
+                  <CopyButton text={m[0]} iconOnly className="opacity-0 group-hover:opacity-100" />
+                </li>
+              ))}
+            </ul>
+          </ToolPanel>
+        )}
+      </OptionsLayout>
     </ToolLayout>
   );
 }

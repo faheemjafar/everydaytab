@@ -1,210 +1,123 @@
 "use client";
 
+import { useMemo, useState } from "react";
+import { Fingerprint, RefreshCw } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { 
-  Fingerprint, 
-  Copy, 
-  Check, 
-  RefreshCw, 
-  Eraser, 
-  Download, 
-  List, 
-  ShieldCheck,
-  Settings2,
-  Trash2
-} from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { ClearButton, CopyButton, DownloadButton, Field, OptionsLayout, PrivacyNote, Segmented, ToolPanel } from "@/components/tool";
+
+type Format = "plain" | "braces" | "upper" | "nodash";
+
+function uuidV4(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const a = new Uint8Array(16);
+  crypto.getRandomValues(a);
+  a[6] = (a[6] & 0x0f) | 0x40;
+  a[8] = (a[8] & 0x3f) | 0x80;
+  const h = Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+function format(u: string, f: Format) {
+  switch (f) {
+    case "braces": return `{${u}}`;
+    case "upper": return u.toUpperCase();
+    case "nodash": return u.replace(/-/g, "");
+    default: return u;
+  }
+}
 
 export default function UuidGenerator() {
-  const [uuids, setUuids] = useState<string[]>([]);
   const [count, setCount] = useState(10);
-  const [copiedAll, setCopiedAll] = useState(false);
-  const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [fmt, setFmt] = useState<Format>("plain");
+  const [quoted, setQuoted] = useState(false);
+  // Regenerated whenever count or seed changes; seed bumps on "Generate".
+  const [seed, setSeed] = useState(0);
+  const [cleared, setCleared] = useState(false);
 
-  const generateUUID = () => {
-    // Cryptographically secure UUID v4
-    const array = new Uint8Array(16);
-    window.crypto.getRandomValues(array);
-    array[6] = (array[6] & 0x0f) | 0x40; // Version 4
-    array[8] = (array[8] & 0x3f) | 0x80; // Variant 10xx
-    
-    const hex = Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+  const uuids = useMemo(
+    () => (cleared ? [] : Array.from({ length: Math.min(Math.max(count, 1), 1000) }, uuidV4)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [count, seed, cleared]
+  );
+
+  const generate = () => {
+    setCleared(false);
+    setSeed((s) => s + 1);
   };
 
-  const generateBulk = useCallback(() => {
-    const newUuids = Array.from({ length: Math.min(count, 500) }, () => generateUUID());
-    setUuids(newUuids);
-  }, [count]);
+  const rendered = uuids.map((u) => (quoted ? `"${format(u, fmt)}"` : format(u, fmt)));
+  const joined = rendered.join(quoted ? ",\n" : "\n");
 
-  useEffect(() => {
-    generateBulk();
-  }, []);
-
-  const copyAll = () => {
-    if (uuids.length === 0) return;
-    navigator.clipboard.writeText(uuids.join("\n"));
-    setCopiedAll(true);
-    setTimeout(() => setCopiedAll(false), 2000);
-  };
-
-  const copySingle = (text: string, index: number) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(index);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const downloadTxt = () => {
-    if (uuids.length === 0) return;
-    const blob = new Blob([uuids.join("\n")], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `everydaytab-uuids-${Date.now()}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const options = (
+    <ToolPanel title="Options" bodyClassName="p-3 space-y-4">
+      <Field label="Quantity" hint="Up to 1,000 at once." htmlFor="uuid-count">
+        <Input
+          id="uuid-count"
+          type="number"
+          min={1}
+          max={1000}
+          value={count}
+          onChange={(e) => setCount(parseInt(e.target.value) || 1)}
+          className="font-mono"
+        />
+      </Field>
+      <Field label="Format">
+        <Segmented
+          size="sm"
+          value={fmt}
+          onChange={setFmt}
+          options={[
+            { value: "plain", label: "Default" },
+            { value: "upper", label: "UPPER" },
+            { value: "braces", label: "{…}" },
+            { value: "nodash", label: "No dashes" },
+          ]}
+        />
+      </Field>
+      <Field label="Quote values" hint="Ready to paste into JSON or SQL." inline>
+        <Switch checked={quoted} onCheckedChange={setQuoted} />
+      </Field>
+      <Button size="lg" onClick={generate} className="w-full">
+        <RefreshCw /> Generate
+      </Button>
+      <PrivacyNote>Version 4 UUIDs from crypto.randomUUID().</PrivacyNote>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="uuid-generator">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-4 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2">
-              <Settings2 className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Configuration</span>
+      <OptionsLayout options={options}>
+        <ToolPanel
+          title={`Generated · ${uuids.length}`}
+          actions={
+            <>
+              <CopyButton text={joined} label="Copy all" />
+              <DownloadButton content={joined} filename="uuids.txt" iconOnly />
+              <ClearButton onClick={() => setCleared(true)} iconOnly disabled={!uuids.length} />
+            </>
+          }
+        >
+          {uuids.length ? (
+            <ul className="divide-y divide-border max-h-[600px] overflow-y-auto custom-scrollbar">
+              {rendered.map((u, i) => (
+                <li key={i} className="group flex items-center gap-3 px-3 h-9">
+                  <span className="w-8 text-[11px] text-muted-foreground tabular-nums text-right">{i + 1}</span>
+                  <code className="flex-1 font-mono text-[13px] truncate">{u}</code>
+                  <CopyButton text={u} iconOnly className="opacity-0 group-hover:opacity-100 focus:opacity-100" />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="flex flex-col items-center justify-center gap-2 py-20 text-muted-foreground bg-dots">
+              <Fingerprint className="w-8 h-8 opacity-40" />
+              <p className="text-sm">Nothing generated yet</p>
             </div>
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Quantity</Label>
-                  <span className="text-xl font-mono font-bold text-primary">{count}</span>
-                </div>
-                <Input 
-                  type="number" 
-                  min={1} 
-                  max={500} 
-                  value={count} 
-                  onChange={(e) => setCount(parseInt(e.target.value) || 1)}
-                  className="h-12 px-4 rounded-xl bg-muted/30 border-transparent focus:border-primary/20 text-lg font-mono" 
-                />
-                <p className="text-[10px] text-muted-foreground leading-relaxed italic">
-                  * Generate up to 500 secure UUIDs at once.
-                </p>
-              </div>
-
-              <div className="space-y-3">
-                <Button 
-                  onClick={generateBulk}
-                  className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-                >
-                  <RefreshCw className="w-5 h-5 mr-2" />
-                  Generate New List
-                </Button>
-                <div className="grid grid-cols-2 gap-3">
-                  <Button 
-                    variant="outline" 
-                    onClick={copyAll}
-                    disabled={uuids.length === 0}
-                    className={cn(
-                      "h-12 rounded-xl border-border/50 font-bold transition-all",
-                      copiedAll && "text-green-500 border-green-500/20 bg-green-500/5"
-                    )}
-                  >
-                    {copiedAll ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-                    Copy All
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    onClick={downloadTxt}
-                    disabled={uuids.length === 0}
-                    className="h-12 rounded-xl border-border/50 font-bold"
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    Export
-                  </Button>
-                </div>
-                <Button 
-                  variant="ghost" 
-                  className="w-full h-11 rounded-xl text-muted-foreground hover:text-red-500 transition-all font-bold"
-                  onClick={() => setUuids([])}
-                  disabled={uuids.length === 0}
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Clear All
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="bg-primary/5 rounded-3xl p-6 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Security Note</h3>
-            </div>
-            <p className="text-[10px] text-muted-foreground leading-relaxed">
-              These UUIDs are generated using the <strong>window.crypto</strong> API, ensuring they are suitable for high-security applications and unique identifier needs.
-            </p>
-          </div>
-        </div>
-
-        <div className="lg:col-span-8">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-[2.5rem] overflow-hidden min-h-[600px]">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <List className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Generated List</span>
-              </div>
-              <div className="px-3 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-bold uppercase tracking-wider">
-                {uuids.length} entries
-              </div>
-            </div>
-            <CardContent className="p-0">
-              {uuids.length > 0 ? (
-                <div className="divide-y divide-border/40">
-                  {uuids.map((uuid, i) => (
-                    <div 
-                      key={i} 
-                      className="group flex items-center justify-between px-8 py-4 hover:bg-primary/[0.02] transition-colors"
-                    >
-                      <div className="flex items-center gap-4">
-                        <span className="text-[10px] font-mono text-muted-foreground/40 w-6">{i + 1}</span>
-                        <span className="text-sm font-mono font-medium tracking-tight group-hover:text-primary transition-colors">
-                          {uuid}
-                        </span>
-                      </div>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className={cn(
-                          "h-8 w-8 rounded-lg transition-all opacity-0 group-hover:opacity-100",
-                          copiedId === i && "opacity-100 text-green-500 bg-green-500/5"
-                        )}
-                        onClick={() => copySingle(uuid, i)}
-                      >
-                        {copiedId === i ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-[500px] text-center space-y-4 opacity-20">
-                  <Fingerprint className="w-20 h-24" />
-                  <p className="text-lg font-bold">List is empty</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+          )}
+        </ToolPanel>
+      </OptionsLayout>
     </ToolLayout>
   );
 }
-
