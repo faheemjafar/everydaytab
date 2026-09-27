@@ -1,259 +1,209 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+import { Camera, Circle, Download, Monitor, Power, Square, Video } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { 
-  Camera, 
-  Video, 
-  Monitor, 
-  Download, 
-  Trash2, 
-  Play, 
-  Square, 
-  Zap, 
-  Info,
-  RefreshCw,
-  VideoOff,
-  Mic,
-  MicOff
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Switch } from "@/components/ui/switch";
+import { Field, OptionsLayout, PrivacyNote, Segmented, StatusBadge, ToolAlert, ToolPanel, formatBytes } from "@/components/tool";
+
+type Mode = "camera" | "screen";
+
+const MIME_CANDIDATES = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+const pickMime = () => (typeof MediaRecorder === "undefined" ? "" : MIME_CANDIDATES.find((m) => MediaRecorder.isTypeSupported(m)) ?? "");
+const fmtTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 export default function CameraRecorder() {
+  const [mode, setMode] = useState<Mode>("camera");
+  const [audio, setAudio] = useState(true);
+  const [mirror, setMirror] = useState(true);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [recording, setRecording] = useState(false);
-  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
-  const [mode, setMode] = useState<"camera" | "screen">("camera");
+  const [elapsed, setElapsed] = useState(0);
+  const [clip, setClip] = useState<{ url: string; blob: Blob } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+
+  const liveRef = useRef<HTMLVideoElement>(null);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const chunks = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // Stop all tracks when leaving the page so the camera light turns off.
+  useEffect(() => () => streamRef.current?.getTracks().forEach((t) => t.stop()), []);
+
+  useEffect(() => {
+    if (liveRef.current) liveRef.current.srcObject = stream;
+  }, [stream]);
+
+  useEffect(() => {
+    if (!recording) return;
+    const start = Date.now();
+    const t = setInterval(() => setElapsed((Date.now() - start) / 1000), 250);
+    return () => clearInterval(t);
+  }, [recording]);
+
+  const stopStream = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setStream(null);
+  };
 
   const startStream = async () => {
     setError(null);
     try {
-      let newStream;
-      if (mode === "camera") {
-        newStream = await navigator.mediaDevices.getUserMedia({ 
-          video: true, 
-          audio: true 
-        });
-      } else {
-        newStream = await navigator.mediaDevices.getDisplayMedia({ 
-          video: true, 
-          audio: true 
-        });
-      }
-      setStream(newStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = newStream;
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to access media device.");
-    }
-  };
-
-  const stopStream = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-      if (videoRef.current) videoRef.current.srcObject = null;
+      const s =
+        mode === "camera"
+          ? await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 } }, audio })
+          : await navigator.mediaDevices.getDisplayMedia({ video: true, audio });
+      // If the user stops screen sharing from the browser UI, reflect it.
+      s.getVideoTracks()[0]?.addEventListener("ended", () => {
+        if (recRef.current?.state === "recording") recRef.current.stop();
+        stopStream();
+      });
+      streamRef.current = s;
+      setStream(s);
+    } catch (e) {
+      const name = (e as DOMException).name;
+      setError(name === "NotAllowedError" ? "Permission was denied. Allow access in your browser's site settings and try again." : (e as Error).message || "Couldn't access the device.");
     }
   };
 
   const startRecording = () => {
     if (!stream) return;
-    setRecording(true);
-    chunksRef.current = [];
-    const recorder = new MediaRecorder(stream);
-    mediaRecorderRef.current = recorder;
-
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
-    };
-
-    recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: "video/webm" });
-      setRecordedBlob(blob);
-    };
-
-    recorder.start();
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
+    const mimeType = pickMime();
+    chunks.current = [];
+    const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    rec.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
+    rec.onstop = () => {
+      const blob = new Blob(chunks.current, { type: rec.mimeType || "video/webm" });
+      setClip((old) => {
+        if (old) URL.revokeObjectURL(old.url);
+        return { url: URL.createObjectURL(blob), blob };
+      });
       setRecording(false);
+    };
+    rec.start(1000);
+    recRef.current = rec;
+    setElapsed(0);
+    setRecording(true);
+  };
+
+  const stopRecording = () => recRef.current?.state === "recording" && recRef.current.stop();
+
+  const snapshot = () => {
+    const v = liveRef.current;
+    if (!v || !v.videoWidth) return;
+    const c = document.createElement("canvas");
+    c.width = v.videoWidth;
+    c.height = v.videoHeight;
+    const ctx = c.getContext("2d")!;
+    if (mode === "camera" && mirror) {
+      ctx.translate(c.width, 0);
+      ctx.scale(-1, 1);
     }
+    ctx.drawImage(v, 0, 0);
+    c.toBlob((b) => {
+      if (!b) return;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(b);
+      a.download = `photo-${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }, "image/png");
   };
 
-  const downloadVideo = () => {
-    if (!recordedBlob) return;
-    const url = URL.createObjectURL(recordedBlob);
+  const downloadClip = () => {
+    if (!clip) return;
+    const ext = clip.blob.type.includes("mp4") ? "mp4" : "webm";
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `recording-${Date.now()}.webm`;
-    document.body.appendChild(a);
+    a.href = clip.url;
+    a.download = `recording-${new Date().toISOString().replace(/[:.]/g, "-")}.${ext}`;
     a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   };
 
-  useEffect(() => {
-    return () => stopStream();
-  }, []);
+  const options = (
+    <ToolPanel title="Source" bodyClassName="p-3 space-y-4" footer={<PrivacyNote>Recorded in your browser; nothing is uploaded.</PrivacyNote>}>
+      <Segmented
+        value={mode}
+        onChange={(m) => { stopStream(); setMode(m); }}
+        options={[
+          { value: "camera", label: <><Camera className="w-3.5 h-3.5" /> Camera</> },
+          { value: "screen", label: <><Monitor className="w-3.5 h-3.5" /> Screen</> },
+        ]}
+      />
+      <Field label="Record audio" inline>
+        <Switch checked={audio} onCheckedChange={setAudio} disabled={!!stream} />
+      </Field>
+      {mode === "camera" && (
+        <Field label="Mirror preview" inline>
+          <Switch checked={mirror} onCheckedChange={setMirror} />
+        </Field>
+      )}
+      {!stream ? (
+        <Button size="lg" onClick={startStream} className="w-full">
+          <Power /> Enable {mode === "camera" ? "camera" : "screen share"}
+        </Button>
+      ) : (
+        <div className="space-y-2">
+          {!recording ? (
+            <Button size="lg" onClick={startRecording} className="w-full">
+              <Circle className="fill-current text-red-500" /> Start recording
+            </Button>
+          ) : (
+            <Button size="lg" variant="destructive" onClick={stopRecording} className="w-full">
+              <Square className="fill-current" /> Stop · {fmtTime(elapsed)}
+            </Button>
+          )}
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={snapshot} className="flex-1" disabled={!stream}>
+              <Camera /> Photo
+            </Button>
+            <Button variant="ghost" onClick={stopStream} disabled={recording} className="flex-1">
+              Turn off
+            </Button>
+          </div>
+        </div>
+      )}
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="camera-recorder">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Controls Side */}
-        <div className="lg:col-span-4 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-6">
-                <div className="space-y-4">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Recording Mode</Label>
-                  <div className="grid grid-cols-2 gap-2 p-1 bg-muted/50 rounded-xl border border-border/40">
-                    <Button
-                      variant={mode === "camera" ? "default" : "ghost"}
-                      size="sm"
-                      onClick={() => { setMode("camera"); stopStream(); }}
-                      className={cn("rounded-lg font-bold h-10 uppercase text-[10px]", mode === "camera" && "shadow-md")}
-                    >
-                      <Video className="w-3.5 h-3.5 mr-2" />
-                      Camera
-                    </Button>
-                    <Button
-                      variant={mode === "screen" ? "default" : "ghost"}
-                      size="sm"
-                      onClick={() => { setMode("screen"); stopStream(); }}
-                      className={cn("rounded-lg font-bold h-10 uppercase text-[10px]", mode === "screen" && "shadow-md")}
-                    >
-                      <Monitor className="w-3.5 h-3.5 mr-2" />
-                      Screen
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t border-border/40 space-y-4">
-                  {!stream ? (
-                    <Button 
-                      onClick={startStream}
-                      className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-                    >
-                      <RefreshCw className="w-5 h-5 mr-2" />
-                      Enable {mode === "camera" ? "Camera" : "Screen"}
-                    </Button>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      {!recording ? (
-                        <Button 
-                          onClick={startRecording}
-                          className="w-full h-14 rounded-2xl text-lg font-bold bg-destructive hover:bg-destructive/90 shadow-lg shadow-destructive/20 transition-all active:scale-[0.98]"
-                        >
-                          <Play className="w-5 h-5 mr-2 fill-white" />
-                          Start Recording
-                        </Button>
-                      ) : (
-                        <Button 
-                          onClick={stopRecording}
-                          className="w-full h-14 rounded-2xl text-lg font-bold bg-foreground text-background hover:opacity-90 shadow-lg transition-all animate-pulse"
-                        >
-                          <Square className="w-5 h-5 mr-2 fill-current" />
-                          Stop Recording
-                        </Button>
-                      )}
-                      <Button variant="ghost" onClick={stopStream} className="rounded-xl font-bold h-10">
-                        <VideoOff className="w-4 h-4 mr-2" />
-                        Turn Off
-                      </Button>
-                    </div>
-                  )}
-                </div>
+      <OptionsLayout options={options}>
+        <ToolPanel
+          title="Live"
+          actions={recording ? <StatusBadge tone="error">● REC {fmtTime(elapsed)}</StatusBadge> : stream ? <StatusBadge tone="success">Live</StatusBadge> : null}
+        >
+          <div className="aspect-video bg-stone-950 flex items-center justify-center">
+            {stream ? (
+              <video ref={liveRef} autoPlay muted playsInline className="w-full h-full object-contain" style={mode === "camera" && mirror ? { transform: "scaleX(-1)" } : undefined} />
+            ) : (
+              <div className="text-center text-stone-400 space-y-2">
+                <Video className="w-8 h-8 mx-auto opacity-50" />
+                <p className="text-sm">Enable the {mode === "camera" ? "camera" : "screen share"} to start</p>
               </div>
-
-              {error && (
-                <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs font-bold flex items-center gap-2">
-                  <Info className="w-4 h-4" />
-                  {error}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Recording Info</h3>
-            </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Recordings are processed 100% locally in your browser. Video is saved as <strong>WebM</strong> format which is optimized for web playback and small file sizes.
-            </p>
+            )}
           </div>
-        </div>
+        </ToolPanel>
 
-        {/* Viewport Side */}
-        <div className="lg:col-span-8 flex flex-col gap-6">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[3rem] overflow-hidden flex flex-col relative aspect-video bg-black/95 group">
-            {!stream && !recordedBlob && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-muted-foreground/30">
-                <VideoOff className="w-20 h-20" />
-                <p className="font-bold text-sm uppercase tracking-widest">Feed Disabled</p>
-              </div>
-            )}
-            
-            <video 
-              ref={videoRef} 
-              autoPlay 
-              muted 
-              playsInline 
-              className={cn(
-                "w-full h-full object-cover",
-                !stream && "hidden"
-              )}
-            />
-
-            {recordedBlob && !stream && (
-              <video 
-                src={URL.createObjectURL(recordedBlob)} 
-                controls 
-                className="w-full h-full object-cover"
-              />
-            )}
-
-            {recording && (
-              <div className="absolute top-8 left-8 flex items-center gap-3 bg-destructive px-4 py-2 rounded-full shadow-xl animate-bounce">
-                <div className="w-3 h-3 rounded-full bg-white animate-pulse" />
-                <span className="text-white text-[10px] font-black uppercase tracking-widest">Recording</span>
-              </div>
-            )}
-          </Card>
-
-          {recordedBlob && (
-            <div className="flex gap-4 animate-in slide-in-from-bottom-4">
-              <Button 
-                onClick={downloadVideo}
-                className="flex-1 h-14 rounded-2xl text-lg font-bold bg-green-500 hover:bg-green-600 shadow-lg shadow-green-500/20 transition-all"
-              >
-                <Download className="w-5 h-5 mr-2" />
-                Download Recording
-              </Button>
-              <Button 
-                variant="outline" 
-                onClick={() => setRecordedBlob(null)}
-                className="w-14 h-14 rounded-2xl border-border/40 text-destructive hover:bg-destructive/5"
-              >
-                <Trash2 className="w-5 h-5" />
-              </Button>
-            </div>
-          )}
-        </div>
-      </div>
+        {clip && (
+          <ToolPanel
+            title="Recording"
+            actions={<StatusBadge>{formatBytes(clip.blob.size)} · {clip.blob.type.includes("mp4") ? "MP4" : "WebM"}</StatusBadge>}
+            footer={
+              <>
+                <span className="flex-1" />
+                <Button variant="outline" onClick={downloadClip}>
+                  <Download /> Download
+                </Button>
+              </>
+            }
+          >
+            <video src={clip.url} controls className="w-full aspect-video bg-stone-950" />
+          </ToolPanel>
+        )}
+        {error && <ToolAlert tone="error">{error}</ToolAlert>}
+      </OptionsLayout>
     </ToolLayout>
   );
 }

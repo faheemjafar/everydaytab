@@ -1,201 +1,149 @@
 "use client";
 
+import { useRef, useState } from "react";
+import Lottie, { type LottieRefCurrentProps } from "lottie-react";
+import { FileJson, Pause, Play, Repeat, RotateCcw } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { 
-  Play, 
-  Pause, 
-  RotateCcw, 
-  Trash2,
-  Zap,
-  Info,
-  FileUp,
-  FileCode,
-  Settings2,
-  Maximize2,
-  Download,
-  AlertCircle
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import Lottie from "lottie-react";
+import { ColorField, Field, FileDropzone, OptionsLayout, Segmented, SliderField, Stat, StatGrid, ToolAlert, ToolPanel, formatBytes } from "@/components/tool";
+
+interface LottieJson {
+  v: string;
+  fr: number;
+  ip: number;
+  op: number;
+  w: number;
+  h: number;
+  nm?: string;
+  layers: unknown[];
+  assets?: unknown[];
+}
 
 export default function LottiePreviewer() {
-  const [animationData, setAnimationData] = useState<any>(null);
-  const [isPlaying, setIsRunning] = useState(true);
+  const [data, setData] = useState<LottieJson | null>(null);
+  const [meta, setMeta] = useState<{ name: string; size: number } | null>(null);
+  const [playing, setPlaying] = useState(true);
+  const [loop, setLoop] = useState(true);
+  const [speed, setSpeed] = useState(1);
+  const [frame, setFrame] = useState(0);
+  const [bg, setBg] = useState<"checker" | "light" | "dark" | "custom">("checker");
+  const [custom, setCustom] = useState("#ffffff");
   const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const lottieRef = useRef<any>(null);
+  const ref = useRef<LottieRefCurrentProps>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      processFile(file);
+  const load = async (files: File[]) => {
+    const f = files[0];
+    if (!f) return;
+    setError(null);
+    try {
+      const json = JSON.parse(await f.text());
+      if (!json.v || !Array.isArray(json.layers)) throw new Error("This JSON isn't a Lottie animation (missing v / layers).");
+      setData(json);
+      setMeta({ name: f.name, size: f.size });
+      setPlaying(true);
+      setFrame(0);
+    } catch (e) {
+      setError((e as Error).message || "Failed to parse the Lottie file.");
     }
   };
 
-  const processFile = (file: File) => {
-    setError(null);
-    if (file.type !== "application/json" && !file.name.endsWith(".json")) {
-      setError("Please upload a valid JSON Lottie file.");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const json = JSON.parse(event.target?.result as string);
-        if (!json.v || !json.layers) {
-          throw new Error("Invalid Lottie JSON structure.");
-        }
-        setAnimationData(json);
-      } catch (err: any) {
-        setError(err.message || "Failed to parse Lottie JSON.");
-      }
-    };
-    reader.readAsText(file);
+  const toggle = () => {
+    if (playing) ref.current?.pause();
+    else ref.current?.play();
+    setPlaying(!playing);
   };
 
-  const clear = () => {
-    setAnimationData(null);
-    setError(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
+  if (!data) {
+    return (
+      <ToolLayout toolId="lottie-preview">
+        <div className="space-y-3">
+          <FileDropzone onFiles={load} accept="application/json,.json,.lottie" icon={<FileJson className="w-5 h-5" />} title="Drop a Lottie JSON file" hint="Exported from After Effects (Bodymovin), LottieFiles or similar." className="min-h-72" />
+          {error && <ToolAlert tone="error">{error}</ToolAlert>}
+        </div>
+      </ToolLayout>
+    );
+  }
+
+  const total = Math.max(1, data.op - data.ip);
+  const duration = total / (data.fr || 30);
+  const background = bg === "light" ? "#ffffff" : bg === "dark" ? "#1c1917" : bg === "custom" ? custom : undefined;
+
+  const options = (
+    <ToolPanel title="Playback" bodyClassName="p-3 space-y-4">
+      <div className="flex gap-1.5">
+        <Button onClick={toggle} className="flex-1">
+          {playing ? <Pause /> : <Play />} {playing ? "Pause" : "Play"}
+        </Button>
+        <Button variant="outline" size="icon" onClick={() => { ref.current?.goToAndPlay(0, true); setPlaying(true); }} aria-label="Restart">
+          <RotateCcw />
+        </Button>
+        <Button variant={loop ? "soft" : "outline"} size="icon" onClick={() => setLoop(!loop)} aria-pressed={loop} aria-label="Loop">
+          <Repeat />
+        </Button>
+      </div>
+      <SliderField
+        label="Speed"
+        value={speed}
+        onChange={(v) => { setSpeed(v); ref.current?.setSpeed(v); }}
+        min={0.25}
+        max={3}
+        step={0.25}
+        format={(v) => `${v}×`}
+      />
+      <SliderField
+        label="Frame"
+        value={frame}
+        onChange={(v) => { setFrame(v); ref.current?.goToAndStop(v, true); setPlaying(false); }}
+        min={0}
+        max={total}
+        format={(v) => `${Math.round(v)} / ${total}`}
+      />
+      <Field label="Background">
+        <Segmented
+          size="sm"
+          value={bg}
+          onChange={setBg}
+          options={[
+            { value: "checker", label: "Grid" },
+            { value: "light", label: "Light" },
+            { value: "dark", label: "Dark" },
+            { value: "custom", label: "Custom" },
+          ]}
+        />
+      </Field>
+      {bg === "custom" && <ColorField value={custom} onChange={setCustom} />}
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="lottie-preview">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Controls Side */}
-        <div className="lg:col-span-4 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-6">
-                <div 
-                  onClick={() => fileInputRef.current?.click()}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const file = e.dataTransfer.files[0];
-                    if (file) processFile(file);
-                  }}
-                  className={cn(
-                    "relative group h-48 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center transition-all cursor-pointer",
-                    animationData ? "border-primary bg-primary/5 shadow-inner" : "border-border/60 hover:border-primary/40 hover:bg-primary/5"
-                  )}
-                >
-                  <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".json,application/json" />
-                  
-                  <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-3 group-hover:scale-110 transition-transform">
-                    <FileUp className="w-8 h-8" />
-                  </div>
-                  
-                  <div className="text-center">
-                    <h3 className="font-bold text-sm">{animationData ? "Change Animation" : "Drop Lottie JSON"}</h3>
-                    <p className="text-[10px] text-muted-foreground mt-1 px-4">Click or drag a .json file to preview</p>
-                  </div>
-                </div>
-
-                {animationData && (
-                  <div className="pt-4 border-t border-border/40 grid grid-cols-2 gap-4">
-                    <Button 
-                      variant={isPlaying ? "outline" : "default"} 
-                      onClick={() => setIsRunning(!isPlaying)}
-                      className="rounded-xl h-12 font-bold uppercase text-[10px]"
-                    >
-                      {isPlaying ? <Pause className="w-3.5 h-3.5 mr-2" /> : <Play className="w-3.5 h-3.5 mr-2" />}
-                      {isPlaying ? "Pause" : "Play"}
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      onClick={clear}
-                      className="rounded-xl h-12 font-bold uppercase text-[10px] text-destructive hover:bg-destructive/5"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 mr-2" />
-                      Clear
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {error && (
-                <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs font-bold flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4" />
-                  {error}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Pro Tip</h3>
+      <OptionsLayout options={options}>
+        <ToolPanel
+          title={<span className="normal-case tracking-normal font-medium text-foreground">{meta?.name}</span>}
+          actions={
+            <label className="inline-flex items-center h-7 px-2.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer">
+              Replace
+              <input type="file" accept="application/json,.json" className="hidden" onChange={(e) => { if (e.target.files) load(Array.from(e.target.files)); e.target.value = ""; }} />
+            </label>
+          }
+        >
+          <div
+            className={bg === "checker" ? "flex items-center justify-center p-6 min-h-[420px] bg-[conic-gradient(#0000000d_25%,transparent_0_50%,#0000000d_0_75%,transparent_0)] bg-[length:16px_16px]" : "flex items-center justify-center p-6 min-h-[420px]"}
+            style={background ? { background } : undefined}
+          >
+            <div className="w-full max-w-md" style={{ aspectRatio: `${data.w} / ${data.h}` }}>
+              <Lottie lottieRef={ref} animationData={data} loop={loop} autoplay onEnterFrame={(e) => setFrame(Math.round((e as unknown as { currentTime: number }).currentTime))} onComplete={() => setPlaying(false)} />
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed italic">
-              Lottie animations are vector-based and highly performant. Use this previewer to verify timing and layering before exporting to your app.
-            </p>
           </div>
-        </div>
-
-        {/* Viewport Side */}
-        <div className="lg:col-span-8">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[3rem] overflow-hidden flex flex-col relative aspect-square md:aspect-video bg-muted/20 group min-h-[400px]">
-            <div className="absolute top-8 right-8 z-10">
-              <div className="px-4 py-2 rounded-full bg-white/80 dark:bg-black/80 text-[10px] font-black uppercase tracking-widest shadow-xl backdrop-blur-md border border-border/20">
-                Visual Canvas
-              </div>
-            </div>
-
-            <CardContent className="flex-1 flex items-center justify-center p-12 overflow-hidden">
-              {animationData ? (
-                <div className="w-full h-full max-w-lg">
-                  <Lottie 
-                    lottieRef={lottieRef}
-                    animationData={animationData} 
-                    loop={true} 
-                    autoplay={isPlaying}
-                    className="w-full h-full"
-                  />
-                </div>
-              ) : (
-                <div className="flex flex-col items-center gap-6 opacity-30 text-center max-w-sm animate-in fade-in duration-700">
-                  <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                    <Play className="w-12 h-12" />
-                  </div>
-                  <div className="space-y-2">
-                    <h3 className="text-xl font-bold">Waiting for Animation</h3>
-                    <p className="text-sm font-medium">Upload a Lottie JSON file to see the magic happen.</p>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-
-            {animationData && (
-              <div className="px-8 py-4 bg-muted/30 border-t border-border/40 flex justify-between items-center">
-                <div className="flex items-center gap-4">
-                  <div className="flex flex-col">
-                    <span className="text-[8px] font-black uppercase text-muted-foreground tracking-widest">Version</span>
-                    <span className="text-xs font-mono font-bold text-primary">{animationData.v}</span>
-                  </div>
-                  <div className="w-px h-6 bg-border/40" />
-                  <div className="flex flex-col">
-                    <span className="text-[8px] font-black uppercase text-muted-foreground tracking-widest">Size</span>
-                    <span className="text-xs font-mono font-bold text-primary">{animationData.w}x{animationData.h}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Zap className="w-3 h-3 text-primary animate-pulse" />
-                  <span className="text-[10px] font-bold text-primary uppercase tracking-widest">Rendering Locally</span>
-                </div>
-              </div>
-            )}
-          </Card>
-        </div>
-      </div>
+        </ToolPanel>
+        <StatGrid>
+          <Stat label="Size" value={`${data.w} × ${data.h}`} />
+          <Stat label="Frame rate" value={`${data.fr} fps`} />
+          <Stat label="Duration" value={`${duration.toFixed(2)} s`} hint={`${total} frames`} />
+          <Stat label="Layers" value={data.layers.length} hint={`${data.assets?.length ?? 0} assets · v${data.v}`} />
+        </StatGrid>
+        {meta && <p className="text-[11px] text-muted-foreground">{formatBytes(meta.size)} JSON</p>}
+      </OptionsLayout>
     </ToolLayout>
   );
 }
