@@ -1,252 +1,97 @@
 "use client";
 
+import { useState } from "react";
+import { ListOrdered } from "lucide-react";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { ToolLayout } from "@/components/tool-layout";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import {
+  Field,
+  FieldGrid,
+  PdfTool,
+  PositionPicker,
+  Segmented,
+  downloadFile,
+  placeText,
+  suffixName,
+  usePdfFile,
+  type HAlign,
+  type VAlign,
+} from "@/components/tool";
 
-import { useState, useRef } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { ListOrdered, FileUp, FileText, RefreshCw, AlertCircle } from "lucide-react";
-import { PDFDocument, rgb } from "pdf-lib";
+type Format = "n" | "page-n" | "n-of-total" | "page-n-of-total";
+
+const FORMATS: { value: Format; label: string }[] = [
+  { value: "n", label: "1" },
+  { value: "page-n", label: "Page 1" },
+  { value: "n-of-total", label: "1 / 10" },
+  { value: "page-n-of-total", label: "Page 1 of 10" },
+];
+
+function formatLabel(fmt: Format, n: number, total: number) {
+  switch (fmt) {
+    case "page-n": return `Page ${n}`;
+    case "n-of-total": return `${n} / ${total}`;
+    case "page-n-of-total": return `Page ${n} of ${total}`;
+    default: return String(n);
+  }
+}
 
 export default function PageNumbers() {
-  const [file, setFile] = useState<File | null>(null);
-  const [position, setPosition] = useState<string>("bottom-center");
-  const [prefix, setPrefix] = useState("");
-  const [suffix, setSuffix] = useState("");
+  const [position, setPosition] = useState<`${VAlign}-${HAlign}`>("bottom-center");
+  const [format, setFormat] = useState<Format>("n");
   const [startNumber, setStartNumber] = useState(1);
-  const [fontSize, setFontSize] = useState(12);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [fontSize, setFontSize] = useState(11);
+  const [skipFirst, setSkipFirst] = useState(false);
+  const pdf = usePdfFile();
 
-  const handleFile = async (f: File) => {
-    if (f.type !== "application/pdf") return;
-    setFile(f);
-    setError(null);
-  };
-
-  const apply = async () => {
-    if (!file) return;
-    setLoading(true);
-    setError(null);
-
-    try {
-      const buffer = await file.arrayBuffer();
-      const doc = await PDFDocument.load(buffer);
+  const apply = () =>
+    pdf.run(async () => {
+      if (!pdf.file) return;
+      const doc = await PDFDocument.load(await pdf.file.arrayBuffer());
+      const font = await doc.embedFont(StandardFonts.Helvetica);
       const pages = doc.getPages();
-      const total = pages.length;
-
-      for (let i = 0; i < total; i++) {
-        const page = pages[i];
-        const { width, height } = page.getSize();
-        const label = `${prefix}${startNumber + i}${suffix}`;
-
-        let x = 0, y = 0;
-        const margin = 20;
-
-        switch (position) {
-          case "top-left":
-            x = margin;
-            y = height - margin;
-            break;
-          case "top-center":
-            x = width / 2;
-            y = height - margin;
-            break;
-          case "top-right":
-            x = width - margin;
-            y = height - margin;
-            break;
-          case "bottom-left":
-            x = margin;
-            y = margin;
-            break;
-          case "bottom-center":
-            x = width / 2;
-            y = margin;
-            break;
-          case "bottom-right":
-            x = width - margin;
-            y = margin;
-            break;
-        }
-
-        page.drawText(label, {
-          x,
-          y,
-          size: fontSize,
-          color: rgb(0.3, 0.3, 0.3),
-        });
-      }
-
-      const bytes = await doc.save();
-      const blob = new Blob([bytes.slice()], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `numbered-${file.name}`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e: any) {
-      setError(e.message || "Failed to add page numbers.");
-    } finally {
-      setLoading(false);
-    }
-  };
+      const [v, h] = position.split("-") as [VAlign, HAlign];
+      const numbered = skipFirst ? pages.slice(1) : pages;
+      const total = numbered.length + startNumber - 1;
+      numbered.forEach((page, i) => {
+        const label = formatLabel(format, startNumber + i, total);
+        const { x, y } = placeText(page.getSize(), font.widthOfTextAtSize(label, fontSize), h, v, 28, fontSize);
+        page.drawText(label, { x, y, size: fontSize, font, color: rgb(0.3, 0.3, 0.3) });
+      });
+      downloadFile(await doc.save(), suffixName(pdf.file, "numbered"));
+    }, "Failed to add page numbers.");
 
   return (
     <ToolLayout toolId="page-numbers">
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-          <CardContent className="p-8">
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const f = e.dataTransfer.files[0];
-                if (f) handleFile(f);
-              }}
-              className="relative group h-48 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center transition-all cursor-pointer border-border/60 hover:border-primary/40 hover:bg-primary/5"
-            >
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-                className="hidden"
-                accept="application/pdf"
-              />
-              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-4 group-hover:scale-110 transition-transform">
-                <FileUp className="w-8 h-8" />
-              </div>
-              <div className="text-center">
-                <h3 className="font-bold text-lg">Upload PDF</h3>
-                <p className="text-sm text-muted-foreground mt-1">Click or drag PDF here</p>
-              </div>
+      <PdfTool
+        pdf={pdf}
+        options={
+          <div className="flex flex-col sm:flex-row gap-5">
+            <Field label="Position">
+              <PositionPicker value={position} onChange={setPosition} />
+            </Field>
+            <div className="flex-1 space-y-4">
+              <Field label="Format">
+                <Segmented value={format} onChange={setFormat} options={FORMATS} />
+              </Field>
+              <FieldGrid>
+                <Field label="Start at" htmlFor="start">
+                  <Input id="start" type="number" min={0} value={startNumber} onChange={(e) => setStartNumber(Number(e.target.value) || 0)} />
+                </Field>
+                <Field label="Font size" htmlFor="size">
+                  <Input id="size" type="number" min={6} max={48} value={fontSize} onChange={(e) => setFontSize(Math.min(48, Math.max(6, Number(e.target.value) || 11)))} />
+                </Field>
+              </FieldGrid>
+              <Field label="Skip the first page" hint="Useful for cover pages." inline>
+                <Switch checked={skipFirst} onCheckedChange={setSkipFirst} />
+              </Field>
             </div>
-
-            {file && (
-              <div className="mt-6 flex items-center gap-3 p-4 rounded-2xl bg-card/60 border border-border/40">
-                <FileText className="w-5 h-5 text-primary shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">{file.name}</p>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-          <CardContent className="p-8 space-y-6">
-            <h3 className="font-bold">Numbering Options</h3>
-
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Position</Label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  "top-left",
-                  "top-center",
-                  "top-right",
-                  "bottom-left",
-                  "bottom-center",
-                  "bottom-right",
-                ].map((pos) => (
-                  <button
-                    key={pos}
-                    onClick={() => setPosition(pos)}
-                    className={`p-2 rounded-xl text-xs font-medium transition-all ${
-                      position === pos
-                        ? "bg-primary text-white"
-                        : "bg-muted hover:bg-muted/80"
-                    }`}
-                  >
-                    {pos.replace("-", " ")}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Prefix</Label>
-                <input
-                  type="text"
-                  value={prefix}
-                  onChange={(e) => setPrefix(e.target.value)}
-                  className="w-full h-10 px-3 rounded-xl border border-border/40 bg-card/60 text-sm"
-                  placeholder="Page "
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Suffix</Label>
-                <input
-                  type="text"
-                  value={suffix}
-                  onChange={(e) => setSuffix(e.target.value)}
-                  className="w-full h-10 px-3 rounded-xl border border-border/40 bg-card/60 text-sm"
-                  placeholder=""
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Start Number</Label>
-                <input
-                  type="number"
-                  min={1}
-                  value={startNumber}
-                  onChange={(e) => setStartNumber(Number(e.target.value))}
-                  className="w-full h-10 px-3 rounded-xl border border-border/40 bg-card/60 text-sm"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Font Size</Label>
-                <input
-                  type="number"
-                  min={6}
-                  max={72}
-                  value={fontSize}
-                  onChange={(e) => setFontSize(Number(e.target.value))}
-                  className="w-full h-10 px-3 rounded-xl border border-border/40 bg-card/60 text-sm"
-                />
-              </div>
-            </div>
-
-            <Button
-              onClick={apply}
-              disabled={!file || loading}
-              className="w-full h-14 rounded-2xl text-base font-bold"
-            >
-              {loading ? (
-                <>
-                  <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
-                  Adding...
-                </>
-              ) : (
-                <>
-                  <ListOrdered className="w-5 h-5 mr-2" />
-                  Add Page Numbers
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-
-      {error && (
-        <div className="p-6 rounded-3xl border-2 border-destructive/30 bg-destructive/5 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-destructive text-white flex items-center justify-center shrink-0">
-            <AlertCircle className="w-6 h-6" />
           </div>
-          <div>
-            <h3 className="font-bold text-destructive">Failed</h3>
-            <p className="text-sm text-destructive/80">{error}</p>
-          </div>
-        </div>
-      )}
+        }
+        action={{ label: "Add page numbers", busyLabel: "Numbering…", icon: <ListOrdered />, onClick: apply }}
+      />
     </ToolLayout>
   );
 }

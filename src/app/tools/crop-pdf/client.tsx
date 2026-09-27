@@ -1,206 +1,135 @@
 "use client";
 
-import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useRef } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Crop, FileUp, FileText, RefreshCw, AlertCircle } from "lucide-react";
+import { useState } from "react";
+import { Crop } from "lucide-react";
 import { PDFDocument } from "pdf-lib";
+import { ToolLayout } from "@/components/tool-layout";
+import { Input } from "@/components/ui/input";
+import { Field, PdfTool, Segmented, StatusBadge, downloadFile, suffixName, usePdfFile } from "@/components/tool";
+
+type Unit = "pt" | "mm";
+type Side = "top" | "right" | "bottom" | "left";
+const PT_PER_MM = 72 / 25.4;
 
 export default function CropPDF() {
-  const [file, setFile] = useState<File | null>(null);
   const [pageSize, setPageSize] = useState<{ width: number; height: number } | null>(null);
-  const [margins, setMargins] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [margins, setMargins] = useState<Record<Side, number>>({ top: 0, right: 0, bottom: 0, left: 0 });
+  const [unit, setUnit] = useState<Unit>("mm");
+  const [linked, setLinked] = useState(false);
 
-  const handleFile = async (f: File) => {
-    if (f.type !== "application/pdf") return;
-    setFile(f);
-    setError(null);
-
+  const pdf = usePdfFile(async (f) => {
+    setMargins({ top: 0, right: 0, bottom: 0, left: 0 });
     try {
-      const buffer = await f.arrayBuffer();
-      const doc = await PDFDocument.load(buffer);
-      const page = doc.getPage(0);
-      const { width, height } = page.getSize();
-      setPageSize({ width, height });
+      const doc = await PDFDocument.load(await f.arrayBuffer());
+      setPageSize(doc.getPage(0).getSize());
     } catch {
       setPageSize(null);
     }
-  };
+  });
 
-  const crop = async () => {
-    if (!file || !pageSize) return;
-    setLoading(true);
-    setError(null);
+  const toPt = (v: number) => (unit === "mm" ? v * PT_PER_MM : v);
+  const fromPt = (v: number) => Math.round((unit === "mm" ? v / PT_PER_MM : v) * 10) / 10;
+  const setSide = (side: Side, value: number) =>
+    setMargins((m) => (linked ? { top: value, right: value, bottom: value, left: value } : { ...m, [side]: value }));
 
-    try {
-      const buffer = await file.arrayBuffer();
-      const doc = await PDFDocument.load(buffer);
-
+  const crop = () =>
+    pdf.run(async () => {
+      if (!pdf.file) return;
+      const doc = await PDFDocument.load(await pdf.file.arrayBuffer());
+      const m = { top: toPt(margins.top), right: toPt(margins.right), bottom: toPt(margins.bottom), left: toPt(margins.left) };
       for (const page of doc.getPages()) {
         const { width, height } = page.getSize();
         if (!Number.isFinite(width) || !Number.isFinite(height)) continue;
-
-        const left = Math.min(Math.max(0, margins.left), width / 2);
-        const right = Math.min(Math.max(0, margins.right), width / 2);
-        const top = Math.min(Math.max(0, margins.top), height / 2);
-        const bottom = Math.min(Math.max(0, margins.bottom), height / 2);
-
-        const newW = Math.max(1, width - left - right);
-        const newH = Math.max(1, height - top - bottom);
-
-        page.setCropBox(left, bottom, newW, newH);
-        page.setMediaBox(left, bottom, newW, newH);
+        const left = Math.min(Math.max(0, m.left), width / 2);
+        const right = Math.min(Math.max(0, m.right), width / 2);
+        const top = Math.min(Math.max(0, m.top), height / 2);
+        const bottom = Math.min(Math.max(0, m.bottom), height / 2);
+        const w = Math.max(1, width - left - right);
+        const h = Math.max(1, height - top - bottom);
+        page.setCropBox(left, bottom, w, h);
+        page.setMediaBox(left, bottom, w, h);
       }
+      downloadFile(await doc.save(), suffixName(pdf.file, "cropped"));
+    }, "Failed to crop PDF.");
 
-      const bytes = await doc.save();
-      const blob = new Blob([bytes.slice()], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `cropped-${file.name}`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e: any) {
-      setError(e.message || "Failed to crop PDF.");
-    } finally {
-      setLoading(false);
-    }
+  const any = Object.values(margins).some((v) => v > 0);
+  const pct = (side: Side) => {
+    if (!pageSize) return 0;
+    const total = side === "top" || side === "bottom" ? pageSize.height : pageSize.width;
+    return Math.min(50, (toPt(margins[side]) / total) * 100);
   };
+
+  const input = (side: Side) => (
+    <Field label={side[0].toUpperCase() + side.slice(1)} htmlFor={`m-${side}`}>
+      <Input id={`m-${side}`} type="number" min={0} step={unit === "mm" ? 1 : 5} value={margins[side]} onChange={(e) => setSide(side, Math.max(0, Number(e.target.value) || 0))} className="w-24" />
+    </Field>
+  );
 
   return (
     <ToolLayout toolId="crop-pdf">
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-          <CardContent className="p-8">
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const f = e.dataTransfer.files[0];
-                if (f) handleFile(f);
-              }}
-              className="relative group h-48 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center transition-all cursor-pointer border-border/60 hover:border-primary/40 hover:bg-primary/5"
-            >
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-                className="hidden"
-                accept="application/pdf"
-              />
-              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-4 group-hover:scale-110 transition-transform">
-                <FileUp className="w-8 h-8" />
+      <PdfTool
+        pdf={pdf}
+        optionsTitle="Trim from each edge"
+        options={
+          <div className="flex flex-col md:flex-row gap-6 items-start">
+            <div className="grid grid-cols-[auto_auto_auto] items-center gap-3">
+              <span />
+              {input("top")}
+              <span />
+              {input("left")}
+              {/* Visual preview of the crop */}
+              <div className="relative w-24 aspect-[1/1.414] rounded-sm border border-border bg-muted/40 overflow-hidden">
+                <div
+                  className="absolute bg-card border border-primary"
+                  style={{ top: `${pct("top")}%`, right: `${pct("right")}%`, bottom: `${pct("bottom")}%`, left: `${pct("left")}%` }}
+                />
               </div>
-              <div className="text-center">
-                <h3 className="font-bold text-lg">Upload PDF</h3>
-                <p className="text-sm text-muted-foreground mt-1">Click or drag PDF here</p>
-              </div>
+              {input("right")}
+              <span />
+              {input("bottom")}
+              <span />
             </div>
-
-            {file && (
-              <div className="mt-6 flex items-center gap-3 p-4 rounded-2xl bg-card/60 border border-border/40">
-                <FileText className="w-5 h-5 text-primary shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">{file.name}</p>
-                  {pageSize && (
-                    <p className="text-xs text-muted-foreground">
-                      {pageSize.width.toFixed(1)} x {pageSize.height.toFixed(1)} pts
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-          <CardContent className="p-8 space-y-6">
-            <h3 className="font-bold">Crop Margins (points)</h3>
-
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { key: "top", label: "Top" },
-                { key: "right", label: "Right" },
-                { key: "bottom", label: "Bottom" },
-                { key: "left", label: "Left" },
-              ].map(({ key, label }) => (
-                <div key={key} className="space-y-2">
-                  <Label className="text-sm font-medium">{label}</Label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={margins[key as keyof typeof margins]}
-                    onChange={(e) =>
-                      setMargins((prev) => ({
-                        ...prev,
-                        [key]: Math.max(0, Number(e.target.value) || 0),
-                      }))
-                    }
-                    className="w-full h-10 px-3 rounded-xl border border-border/40 bg-card/60 text-sm"
-                    placeholder="0"
-                  />
-                </div>
-              ))}
-            </div>
-
-            {pageSize && (
-              <div className="p-4 rounded-2xl bg-primary/5 border border-primary/10 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Original</span>
-                  <span className="font-medium">
-                    {pageSize.width.toFixed(0)} x {pageSize.height.toFixed(0)} pts
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">New</span>
-                  <span className="font-medium">
-                    {(pageSize.width - margins.left - margins.right).toFixed(0)} x{" "}
-                    {(pageSize.height - margins.top - margins.bottom).toFixed(0)} pts
-                  </span>
-                </div>
-              </div>
-            )}
-
-            <Button
-              onClick={crop}
-              disabled={!file || loading}
-              className="w-full h-14 rounded-2xl text-base font-bold"
-            >
-              {loading ? (
-                <>
-                  <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
-                  Cropping...
-                </>
-              ) : (
-                <>
-                  <Crop className="w-5 h-5 mr-2" />
-                  Crop PDF
-                </>
+            <div className="space-y-4">
+              <Field label="Units">
+                <Segmented
+                  size="sm"
+                  value={unit}
+                  onChange={(u) => {
+                    // Convert current values into the new unit.
+                    setMargins((m) => {
+                      const conv = (v: number) => Math.round((u === "mm" ? v / PT_PER_MM : v * PT_PER_MM) * 10) / 10;
+                      return { top: conv(m.top), right: conv(m.right), bottom: conv(m.bottom), left: conv(m.left) };
+                    });
+                    setUnit(u);
+                  }}
+                  options={[
+                    { value: "mm", label: "mm" },
+                    { value: "pt", label: "points" },
+                  ]}
+                />
+              </Field>
+              <Field label="Same on all sides">
+                <Segmented
+                  size="sm"
+                  value={linked ? "on" : "off"}
+                  onChange={(v) => setLinked(v === "on")}
+                  options={[
+                    { value: "off", label: "Off" },
+                    { value: "on", label: "On" },
+                  ]}
+                />
+              </Field>
+              {pageSize && (
+                <p className="text-[11px] text-muted-foreground">
+                  Page 1: {fromPt(pageSize.width)} × {fromPt(pageSize.height)} {unit}
+                </p>
               )}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-
-      {error && (
-        <div className="p-6 rounded-3xl border-2 border-destructive/30 bg-destructive/5 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-destructive text-white flex items-center justify-center shrink-0">
-            <AlertCircle className="w-6 h-6" />
+            </div>
           </div>
-          <div>
-            <h3 className="font-bold text-destructive">Crop Failed</h3>
-            <p className="text-sm text-destructive/80">{error}</p>
-          </div>
-        </div>
-      )}
+        }
+        footerInfo={!any ? <StatusBadge>Set at least one margin</StatusBadge> : undefined}
+        action={{ label: "Crop PDF", busyLabel: "Cropping…", icon: <Crop />, onClick: crop, disabled: !any }}
+      />
     </ToolLayout>
   );
 }
