@@ -1,129 +1,195 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import { useRef, useState } from "react";
+import { Crop as CropIcon } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Crop as CropIcon, Download, Trash2, Image as ImageIcon, Upload, AlertCircle, Settings2, Maximize2, Layers } from "lucide-react";
+import { Field, FieldGrid, FormatQuality, ImageTool, Segmented, baseName, canvasToBlob, drawToCanvas, extFor, useImageFile, type ImageMime } from "@/components/tool";
+
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+type Handle = "move" | "nw" | "ne" | "sw" | "se";
+
+const ASPECTS: { value: string; label: string; r: number | null }[] = [
+  { value: "free", label: "Free", r: null },
+  { value: "1:1", label: "1:1", r: 1 },
+  { value: "4:3", label: "4:3", r: 4 / 3 },
+  { value: "3:2", label: "3:2", r: 3 / 2 },
+  { value: "16:9", label: "16:9", r: 16 / 9 },
+  { value: "9:16", label: "9:16", r: 9 / 16 },
+];
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/** Largest centred rect of aspect r inside W×H (80% if free). */
+function initialRect(W: number, H: number, r: number | null): Rect {
+  if (!r) return { x: Math.round(W * 0.1), y: Math.round(H * 0.1), w: Math.round(W * 0.8), h: Math.round(H * 0.8) };
+  let w = W;
+  let h = w / r;
+  if (h > H) {
+    h = H;
+    w = h * r;
+  }
+  return { x: Math.round((W - w) / 2), y: Math.round((H - h) / 2), w: Math.round(w), h: Math.round(h) };
+}
 
 export default function ImageCropper() {
-  const [originalImage, setOriginalImage] = useState<string | null>(null);
-  const [croppedImage, setCroppedImage] = useState<string | null>(null);
-  const [crop, setCrop] = useState({ x: 0, y: 0, width: 100, height: 100 });
-  const [originalDimensions, setOriginalDimensions] = useState({ width: 0, height: 0 });
-  const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
+  const [rect, setRect] = useState<Rect>({ x: 0, y: 0, w: 0, h: 0 });
+  const [aspect, setAspect] = useState("free");
+  const [format, setFormat] = useState<ImageMime>("image/png");
+  const [quality, setQuality] = useState(0.92);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ handle: Handle; start: Rect; px: number; py: number } | null>(null);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    setError(null); setCroppedImage(null);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const src = ev.target?.result as string;
-      const img = new Image();
-      img.onload = () => { setOriginalDimensions({ width: img.width, height: img.height }); setCrop({ x: 0, y: 0, width: Math.min(100, img.width), height: Math.min(100, img.height) }); };
-      img.src = src; setOriginalImage(src);
-    };
-    reader.readAsDataURL(file);
+  const image = useImageFile((img) => setRect(initialRect(img.naturalWidth, img.naturalHeight, null)));
+  const { width: W, height: H } = image;
+  const ratio = ASPECTS.find((a) => a.value === aspect)?.r ?? null;
+
+  const startDrag = (e: React.PointerEvent, handle: Handle) => {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    drag.current = { handle, start: rect, px: e.clientX, py: e.clientY };
   };
 
-  const doCrop = () => {
-    if (!originalImage || !imgRef.current) return; setError(null);
-    const img = imgRef.current;
-    const scaleX = img.naturalWidth / img.width;
-    const scaleY = img.naturalHeight / img.height;
-    const canvas = document.createElement('canvas');
-    canvas.width = crop.width * scaleX; canvas.height = crop.height * scaleY;
-    const ctx = canvas.getContext('2d'); if (!ctx) return;
-    ctx.drawImage(img, crop.x * scaleX, crop.y * scaleY, crop.width * scaleX, crop.height * scaleY, 0, 0, canvas.width, canvas.height);
-    setCroppedImage(canvas.toDataURL('image/png'));
+  const onMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    const stage = stageRef.current;
+    if (!d || !stage) return;
+    // Convert screen delta to image pixels.
+    const scale = W / stage.clientWidth;
+    const dx = (e.clientX - d.px) * scale;
+    const dy = (e.clientY - d.py) * scale;
+    const s = d.start;
+    if (d.handle === "move") {
+      setRect({ ...s, x: Math.round(clamp(s.x + dx, 0, W - s.w)), y: Math.round(clamp(s.y + dy, 0, H - s.h)) });
+      return;
+    }
+    const left = d.handle.includes("w");
+    const top = d.handle.includes("n");
+    let w = clamp(s.w + (left ? -dx : dx), 8, left ? s.x + s.w : W - s.x);
+    let h = clamp(s.h + (top ? -dy : dy), 8, top ? s.y + s.h : H - s.y);
+    if (ratio) {
+      // Drive by the larger change, then fit within bounds.
+      if (Math.abs(dx) > Math.abs(dy)) h = w / ratio;
+      else w = h * ratio;
+      const maxW = left ? s.x + s.w : W - s.x;
+      const maxH = top ? s.y + s.h : H - s.y;
+      if (w > maxW) {
+        w = maxW;
+        h = w / ratio;
+      }
+      if (h > maxH) {
+        h = maxH;
+        w = h * ratio;
+      }
+    }
+    setRect({
+      x: Math.round(left ? s.x + s.w - w : s.x),
+      y: Math.round(top ? s.y + s.h - h : s.y),
+      w: Math.round(w),
+      h: Math.round(h),
+    });
   };
 
-  const download = () => { if (!croppedImage) return; const a = document.createElement('a'); a.href = croppedImage; a.download = 'cropped.png'; a.click(); };
-  const clear = () => { setOriginalImage(null); setCroppedImage(null); setError(null); };
+  const setField = (k: keyof Rect, v: number) =>
+    setRect((r) => {
+      const next = { ...r, [k]: Math.max(0, Math.round(v)) };
+      if (ratio && k === "w") next.h = Math.round(next.w / ratio);
+      if (ratio && k === "h") next.w = Math.round(next.h * ratio);
+      next.w = clamp(next.w, 1, W);
+      next.h = clamp(next.h, 1, H);
+      next.x = clamp(next.x, 0, W - next.w);
+      next.y = clamp(next.y, 0, H - next.h);
+      return next;
+    });
+
+  const doCrop = () =>
+    image.produce(async () => {
+      if (!image.img) return;
+      const c = drawToCanvas(image.img, rect.w, rect.h, format, rect.x, rect.y, rect.w, rect.h);
+      const blob = await canvasToBlob(c, format, quality);
+      return { blob, width: rect.w, height: rect.h, filename: `${baseName(image.file)}-cropped.${extFor(format)}` };
+    });
+
+  const pct = (v: number, of: number) => `${(v / of) * 100}%`;
+
+  const stage =
+    image.url && W ? (
+      <div className="flex items-center justify-center p-4 min-h-[360px] bg-muted/40">
+        <div ref={stageRef} className="relative select-none touch-none max-w-full" style={{ aspectRatio: `${W} / ${H}`, maxHeight: "60vh", width: `min(100%, calc(60vh * ${W / H}))` }} onPointerMove={onMove} onPointerUp={() => (drag.current = null)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={image.url} alt="" draggable={false} className="absolute inset-0 w-full h-full object-contain" />
+          {/* Dim outside the crop via a giant box-shadow */}
+          <div
+            className="absolute border border-white cursor-move"
+            style={{ left: pct(rect.x, W), top: pct(rect.y, H), width: pct(rect.w, W), height: pct(rect.h, H), boxShadow: "0 0 0 9999px rgb(0 0 0 / 0.55)" }}
+            onPointerDown={(e) => startDrag(e, "move")}
+          >
+            <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
+              {Array.from({ length: 9 }, (_, i) => (
+                <span key={i} className="border-white/30 border-r border-b last:border-0 [&:nth-child(3n)]:border-r-0 [&:nth-child(n+7)]:border-b-0" />
+              ))}
+            </div>
+            {(["nw", "ne", "sw", "se"] as const).map((h) => (
+              <span
+                key={h}
+                onPointerDown={(e) => startDrag(e, h)}
+                className="absolute w-3.5 h-3.5 bg-white border border-stone-400 rounded-xs"
+                style={{
+                  left: h.includes("w") ? -7 : undefined,
+                  right: h.includes("e") ? -7 : undefined,
+                  top: h.includes("n") ? -7 : undefined,
+                  bottom: h.includes("s") ? -7 : undefined,
+                  cursor: h === "nw" || h === "se" ? "nwse-resize" : "nesw-resize",
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    ) : null;
 
   return (
     <ToolLayout toolId="image-cropper">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-8">
-          {!originalImage ? (
-            <Card className="border-2 border-dashed border-border/60 bg-card/30 backdrop-blur-sm rounded-[2.5rem] h-[500px] flex flex-col items-center justify-center space-y-6 transition-all hover:border-primary/20 hover:bg-primary/[0.02] cursor-pointer group" onClick={() => fileInputRef.current?.click()}>
-              <div className="w-20 h-20 rounded-3xl bg-primary/5 flex items-center justify-center text-primary group-hover:scale-110 transition-transform"><Upload className="w-10 h-10" /></div>
-              <div className="text-center space-y-2"><p className="text-xl font-bold">Upload an image</p><p className="text-sm text-muted-foreground">Click or drag and drop to start cropping</p></div>
-              <Button className="rounded-2xl px-8 h-12 bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20">Browse Files</Button>
-              <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
-            </Card>
-          ) : (
-            <div className="space-y-6">
-              <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-                <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between">
-                  <div className="flex items-center gap-3"><ImageIcon className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Original</span></div>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-red-500" onClick={clear}><Trash2 className="w-4 h-4" /></Button>
-                </div>
-                <CardContent className="p-8 flex items-center justify-center min-h-[400px] bg-muted/10">
-                  <div className="relative group"><img ref={imgRef} src={originalImage} alt="Original" className="max-w-full h-auto rounded-xl shadow-2xl transition-transform duration-500 group-hover:scale-[1.01]" /><div className="absolute inset-0 rounded-xl border border-black/5 pointer-events-none" /></div>
-                </CardContent>
-              </Card>
-              {croppedImage && (
-                <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-                  <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center gap-3"><CropIcon className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Cropped Result</span></div>
-                  <CardContent className="p-8 flex items-center justify-center min-h-[300px] bg-muted/10">
-                    <div className="relative group"><img src={croppedImage} alt="Cropped" className="max-w-full h-auto rounded-xl shadow-2xl transition-transform duration-500 group-hover:scale-[1.01]" /><div className="absolute inset-0 rounded-xl border border-black/5 pointer-events-none" /></div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          )}
-          {error && (<div className="mt-6 flex items-center gap-3 p-4 rounded-2xl bg-red-50 border border-red-200 text-red-600 text-sm font-bold"><AlertCircle className="w-5 h-5 flex-shrink-0" />{error}</div>)}
-        </div>
-
-        <div className="lg:col-span-4 space-y-6 sticky top-24">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><Settings2 className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Crop Settings</span></div>
-            <CardContent className="p-8 space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">X (px)</Label>
-                  <Input type="number" value={crop.x} onChange={(e) => setCrop({ ...crop, x: Number(e.target.value) })} className="h-12 px-4 rounded-xl bg-muted/30 border-transparent focus:border-primary/20 text-lg font-mono font-bold" disabled={!originalImage} />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Y (px)</Label>
-                  <Input type="number" value={crop.y} onChange={(e) => setCrop({ ...crop, y: Number(e.target.value) })} className="h-12 px-4 rounded-xl bg-muted/30 border-transparent focus:border-primary/20 text-lg font-mono font-bold" disabled={!originalImage} />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Width (px)</Label>
-                  <Input type="number" value={crop.width} onChange={(e) => setCrop({ ...crop, width: Number(e.target.value) })} className="h-12 px-4 rounded-xl bg-muted/30 border-transparent focus:border-primary/20 text-lg font-mono font-bold" disabled={!originalImage} />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Height (px)</Label>
-                  <Input type="number" value={crop.height} onChange={(e) => setCrop({ ...crop, height: Number(e.target.value) })} className="h-12 px-4 rounded-xl bg-muted/30 border-transparent focus:border-primary/20 text-lg font-mono font-bold" disabled={!originalImage} />
-                </div>
-              </div>
-              <div className="space-y-3 pt-2">
-                <Button onClick={doCrop} disabled={!originalImage} className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"><CropIcon className="w-5 h-5 mr-2" /> Crop</Button>
-                <Button onClick={download} disabled={!croppedImage} variant="outline" className="w-full h-12 rounded-xl border-border/50 font-bold"><Download className="w-4 h-4 mr-2" /> Download</Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><Layers className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Metadata</span></div>
-            <CardContent className="p-6 space-y-3">
-              {originalDimensions.width > 0 ? (
-                <div className="space-y-2">
-                  <div className="flex justify-between p-3 rounded-xl bg-muted/30"><span className="text-[10px] font-bold uppercase text-muted-foreground">Original</span><span className="text-xs font-mono font-bold">{originalDimensions.width} × {originalDimensions.height}</span></div>
-                  <div className="flex justify-between p-3 rounded-xl bg-primary/5 border border-primary/10"><span className="text-[10px] font-bold uppercase text-primary/70">Crop</span><span className="text-xs font-mono font-bold text-primary">{crop.width} × {crop.height}</span></div>
-                </div>
-              ) : (
-                <div className="py-8 flex flex-col items-center justify-center text-center space-y-3 opacity-20"><Maximize2 className="w-10 h-10" /><p className="text-xs font-medium">No image loaded</p></div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      <ImageTool
+        image={image}
+        preview={image.result ? undefined : stage}
+        options={
+          <>
+            <Field label="Aspect ratio">
+              <Segmented
+                size="sm"
+                value={aspect}
+                onChange={(a) => {
+                  setAspect(a);
+                  setRect(initialRect(W, H, ASPECTS.find((x) => x.value === a)?.r ?? null));
+                  image.clearResult();
+                }}
+                options={ASPECTS.map((a) => ({ value: a.value, label: a.label }))}
+              />
+            </Field>
+            <FieldGrid>
+              {(["x", "y", "w", "h"] as const).map((k) => (
+                <Field key={k} label={{ x: "X", y: "Y", w: "Width", h: "Height" }[k]} htmlFor={`c-${k}`}>
+                  <Input id={`c-${k}`} type="number" min={0} value={rect[k]} onChange={(e) => { setField(k, Number(e.target.value) || 0); image.clearResult(); }} />
+                </Field>
+              ))}
+            </FieldGrid>
+            <FormatQuality format={format} onFormat={setFormat} quality={quality} onQuality={setQuality} />
+            {image.result && (
+              <button type="button" onClick={image.clearResult} className="text-xs text-primary hover:underline">
+                ← Adjust crop
+              </button>
+            )}
+          </>
+        }
+        action={{ label: `Crop to ${rect.w} × ${rect.h}`, busyLabel: "Cropping…", icon: <CropIcon />, onClick: doCrop, disabled: rect.w < 1 || rect.h < 1 }}
+      />
     </ToolLayout>
   );
 }
