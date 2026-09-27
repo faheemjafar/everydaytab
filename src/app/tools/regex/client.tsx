@@ -25,6 +25,15 @@ const FLAGS = [
   { key: "s", label: "Dot all", hint: ". matches newlines" },
 ] as const;
 
+const CHEAT: { title: string; items: [string, string][] }[] = [
+  { title: "Characters", items: [[".", "Any character except newline"], ["\\d", "Digit 0–9"], ["\\w", "Word char [A-Za-z0-9_]"], ["\\s", "Whitespace"], ["\\D \\W \\S", "Negations of the above"], ["[abc]", "Any of a, b, c"], ["[^abc]", "Not a, b or c"], ["[a-z]", "Range a to z"], ["\\p{L}", "Any Unicode letter (needs u flag)"]] },
+  { title: "Anchors", items: [["^", "Start of string / line (m)"], ["$", "End of string / line (m)"], ["\\b", "Word boundary"], ["\\B", "Not a word boundary"]] },
+  { title: "Quantifiers", items: [["*", "0 or more"], ["+", "1 or more"], ["?", "0 or 1"], ["{3}", "Exactly 3"], ["{2,5}", "2 to 5"], ["{2,}", "2 or more"], ["*? +?", "Lazy (as few as possible)"]] },
+  { title: "Groups", items: [["(abc)", "Capture group"], ["(?:abc)", "Non-capturing group"], ["(?<name>abc)", "Named group"], ["a|b", "a or b"], ["\\1", "Back-reference to group 1"]] },
+  { title: "Lookaround", items: [["(?=abc)", "Followed by abc"], ["(?!abc)", "Not followed by abc"], ["(?<=abc)", "Preceded by abc"], ["(?<!abc)", "Not preceded by abc"]] },
+  { title: "Common patterns", items: [["^[\\w.+-]+@[\\w-]+\\.[\\w.]+$", "Email (simple)"], ["https?:\\/\\/[^\\s]+", "URL"], ["\\b\\d{4}-\\d{2}-\\d{2}\\b", "ISO date"], ["^#?([a-f\\d]{3}){1,2}$", "Hex colour (i)"], ["\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b", "IPv4 address"], ["^\\s+|\\s+$", "Leading/trailing space"]] },
+];
+
 export default function RegexTester() {
   const [pattern, setPattern] = useState("");
   const [text, setText] = useState("");
@@ -157,6 +166,26 @@ export default function RegexTester() {
             </ul>
           </ToolPanel>
         )}
+
+        <ToolPanel title="Cheat sheet" actions={<span className="text-[11px] text-muted-foreground">Click a token to insert it</span>}>
+          <div className="grid gap-x-6 gap-y-4 p-3.5 sm:grid-cols-2 xl:grid-cols-3">
+            {CHEAT.map((g) => (
+              <div key={g.title}>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-1">{g.title}</p>
+                <ul className="space-y-0.5">
+                  {g.items.map(([tok, desc]) => (
+                    <li key={tok} className="flex items-baseline gap-2 text-[12.5px]">
+                      <button type="button" onClick={() => setPattern((p) => (g.title === "Common patterns" ? tok : p + tok.split(" ")[0]))} className="shrink-0 font-mono text-primary hover:underline text-left">
+                        {tok}
+                      </button>
+                      <span className="text-muted-foreground">{desc}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </ToolPanel>
       </OptionsLayout>
     </ToolLayout>
   );

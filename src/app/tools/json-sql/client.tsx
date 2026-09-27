@@ -1,155 +1,135 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { ToolLayout } from "@/components/tool-layout";
+import { Input } from "@/components/ui/input";
+import { CodeArea, CodeOutput, Field, OptionsLayout, Segmented, ToolAlert, ToolPanel, Toggle } from "@/components/tool";
 
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  Database, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  AlertCircle,
-  FileJson,
-  FileCode,
-  ArrowRight,
-  Settings2,
-  Braces
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+type Dialect = "mysql" | "postgres" | "sqlite" | "mssql";
+
+const SAMPLE = `[
+  { "id": 1, "name": "Ada Lovelace", "email": "ada@example.com", "active": true, "score": 98.5, "joined": "2024-03-01", "tags": ["admin"] },
+  { "id": 2, "name": "Alan O'Neil", "email": null, "active": false, "score": 72, "joined": "2024-06-15T09:30:00Z" },
+  { "id": 3, "name": "Grace Hopper", "email": "grace@example.com", "active": true, "score": 88, "manager_id": 1 }
+]`;
+
+const quoteId = (d: Dialect, s: string) => (d === "mysql" ? `\`${s.replace(/`/g, "``")}\`` : d === "mssql" ? `[${s.replace(/]/g, "]]")}]` : `"${s.replace(/"/g, '""')}"`);
+
+type Kind = "int" | "bigint" | "float" | "bool" | "date" | "timestamp" | "text" | "json" | "null";
+const TYPES: Record<Dialect, Record<Exclude<Kind, "null">, string>> = {
+  mysql: { int: "INT", bigint: "BIGINT", float: "DOUBLE", bool: "BOOLEAN", date: "DATE", timestamp: "DATETIME", text: "VARCHAR(255)", json: "JSON" },
+  postgres: { int: "INTEGER", bigint: "BIGINT", float: "DOUBLE PRECISION", bool: "BOOLEAN", date: "DATE", timestamp: "TIMESTAMPTZ", text: "TEXT", json: "JSONB" },
+  sqlite: { int: "INTEGER", bigint: "INTEGER", float: "REAL", bool: "INTEGER", date: "TEXT", timestamp: "TEXT", text: "TEXT", json: "TEXT" },
+  mssql: { int: "INT", bigint: "BIGINT", float: "FLOAT", bool: "BIT", date: "DATE", timestamp: "DATETIME2", text: "NVARCHAR(255)", json: "NVARCHAR(MAX)" },
+};
+
+function kindOf(v: unknown): Kind {
+  if (v === null || v === undefined) return "null";
+  if (typeof v === "boolean") return "bool";
+  if (typeof v === "number") return Number.isInteger(v) ? (Math.abs(v) > 2147483647 ? "bigint" : "int") : "float";
+  if (typeof v === "object") return "json";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return "date";
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(String(v))) return "timestamp";
+  return "text";
+}
+
+/** Widens two observed kinds to one column type. */
+function merge(a: Kind, b: Kind): Kind {
+  if (a === b || b === "null") return a;
+  if (a === "null") return b;
+  const nums: Kind[] = ["int", "bigint", "float"];
+  if (nums.includes(a) && nums.includes(b)) return nums[Math.max(nums.indexOf(a), nums.indexOf(b))];
+  if ((a === "date" && b === "timestamp") || (a === "timestamp" && b === "date")) return "timestamp";
+  return a === "json" || b === "json" ? "json" : "text";
+}
+
+function literal(d: Dialect, v: unknown): string {
+  if (v === null || v === undefined) return "NULL";
+  if (typeof v === "boolean") return d === "mysql" || d === "postgres" ? String(v).toUpperCase() : v ? "1" : "0";
+  if (typeof v === "number") return Number.isFinite(v) ? String(v) : "NULL";
+  const s = typeof v === "object" ? JSON.stringify(v) : String(v);
+  return `${d === "mssql" ? "N" : ""}'${s.replace(/'/g, "''")}'`;
+}
 
 export default function JSONToSQL() {
-  const [input, setInput] = useState('[\n  {\n    "id": 1,\n    "name": "Faheem",\n    "email": "faheem@example.com"\n  },\n  {\n    "id": 2,\n    "name": "EverydayTab",\n    "email": "tools@everydaytab.com"\n  }\n]');
-  const [tableName, setTableName] = useState("users");
-  const [output, setOutput] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [input, setInput] = useState(SAMPLE);
+  const [table, setTable] = useState("users");
+  const [dialect, setDialect] = useState<Dialect>("postgres");
+  const [batch, setBatch] = useState(100);
+  const [create, setCreate] = useState(true);
+  const [ifNotExists, setIfNotExists] = useState(true);
+  const [pk, setPk] = useState("id");
 
-  const convertToSQL = (val: string, table: string) => {
-    setInput(val);
-    setTableName(table);
-    setError(null);
-    if (!val.trim()) {
-      setOutput("");
-      return;
-    }
-
+  const result = useMemo(() => {
+    if (!input.trim()) return null;
+    let data: unknown;
     try {
-      const data = JSON.parse(val);
-      const rows = Array.isArray(data) ? data : [data];
-      if (rows.length === 0) throw new Error("JSON array is empty.");
-
-      const columns = Object.keys(rows[0]);
-      const sqlColumns = columns.map(c => `\`${c}\``).join(", ");
-      
-      const sqlValues = rows.map(row => {
-        const values = columns.map(col => {
-          const v = row[col];
-          if (v === null) return "NULL";
-          if (typeof v === "string") return `'${v.replace(/'/g, "''")}'`;
-          return v;
-        });
-        return `(${values.join(", ")})`;
-      }).join(",\n");
-
-      setOutput(`INSERT INTO \`${table || "table_name"}\` (${sqlColumns}) VALUES\n${sqlValues};`);
-    } catch (e: any) {
-      setError(e.message);
-      setOutput("");
+      data = JSON.parse(input);
+    } catch (e) {
+      return { error: `Invalid JSON: ${(e as Error).message}` };
     }
-  };
+    const rows = (Array.isArray(data) ? data : [data]).filter((r): r is Record<string, unknown> => !!r && typeof r === "object" && !Array.isArray(r));
+    if (!rows.length) return { error: "Expected an object or an array of objects." };
+    // Union of keys across all rows, in first-seen order.
+    const cols: string[] = [];
+    const kinds: Record<string, Kind> = {};
+    const nullable: Record<string, boolean> = {};
+    for (const r of rows) for (const k of Object.keys(r)) if (!cols.includes(k)) cols.push(k);
+    for (const c of cols) {
+      kinds[c] = rows.reduce<Kind>((acc, r) => merge(acc, kindOf(r[c])), "null");
+      nullable[c] = rows.some((r) => r[c] === null || r[c] === undefined);
+    }
+    const t = quoteId(dialect, table || "table_name");
+    const ddl = `CREATE TABLE ${ifNotExists && dialect !== "mssql" ? "IF NOT EXISTS " : ""}${t} (\n${cols
+      .map((c) => `  ${quoteId(dialect, c)} ${TYPES[dialect][kinds[c] === "null" ? "text" : kinds[c]]}${c === pk ? " PRIMARY KEY" : nullable[c] ? "" : " NOT NULL"}`)
+      .join(",\n")}\n);`;
+    const colList = cols.map((c) => quoteId(dialect, c)).join(", ");
+    const chunks: string[] = [];
+    for (let i = 0; i < rows.length; i += Math.max(1, batch)) {
+      const vals = rows.slice(i, i + Math.max(1, batch)).map((r) => `  (${cols.map((c) => literal(dialect, r[c])).join(", ")})`);
+      chunks.push(`INSERT INTO ${t} (${colList}) VALUES\n${vals.join(",\n")};`);
+    }
+    return { ddl, inserts: chunks.join("\n\n"), rows: rows.length, cols: cols.length };
+  }, [input, table, dialect, batch, ifNotExists, pk]);
 
-  useEffect(() => {
-    convertToSQL(input, tableName);
-  }, []);
-
-  const copyToClipboard = () => {
-    if (!output) return;
-    navigator.clipboard.writeText(output);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const options = (
+    <ToolPanel title="Options" bodyClassName="p-3 space-y-3">
+      <Field label="Dialect">
+        <Segmented size="sm" value={dialect} onChange={setDialect} options={[{ value: "postgres", label: "PostgreSQL" }, { value: "mysql", label: "MySQL" }, { value: "sqlite", label: "SQLite" }, { value: "mssql", label: "SQL Server" }]} className="flex-wrap" />
+      </Field>
+      <Field label="Table name" htmlFor="tn">
+        <Input id="tn" value={table} onChange={(e) => setTable(e.target.value)} className="font-mono" />
+      </Field>
+      <Field label="Primary key column" htmlFor="pk">
+        <Input id="pk" value={pk} onChange={(e) => setPk(e.target.value)} placeholder="none" className="font-mono" />
+      </Field>
+      <Field label="Rows per INSERT" htmlFor="bs">
+        <Input id="bs" type="number" min={1} value={batch} onChange={(e) => setBatch(Math.max(1, Number(e.target.value) || 1))} />
+      </Field>
+      <Toggle label="Include CREATE TABLE" checked={create} onChange={setCreate} />
+      {create && dialect !== "mssql" && <Toggle label="IF NOT EXISTS" checked={ifNotExists} onChange={setIfNotExists} />}
+      <p className="text-[11px] text-muted-foreground">Column types are inferred from every row. Nested objects/arrays become JSON columns.</p>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="json-sql">
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch h-[calc(100vh-300px)] min-h-[500px]">
-        {/* Input Panel */}
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col">
-          <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <Braces className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Source JSON</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <input 
-                value={tableName}
-                onChange={(e) => {
-                  setTableName(e.target.value);
-                  convertToSQL(input, e.target.value);
-                }}
-                placeholder="Table Name"
-                className="bg-background/50 border border-border/40 rounded-lg px-3 py-1 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-primary/20 w-32"
-              />
-              <Button variant="ghost" size="icon" onClick={() => convertToSQL("", tableName)} className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive">
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-          <CardContent className="p-0 flex-1 relative">
-            <Textarea
-              placeholder="Paste JSON array here..."
-              value={input}
-              onChange={(e) => convertToSQL(e.target.value, tableName)}
-              className="w-full h-full p-8 bg-transparent border-none focus-visible:ring-0 resize-none font-mono text-xs leading-relaxed"
-            />
-          </CardContent>
-        </Card>
-
-        {/* Output Panel */}
-        <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col relative">
-          <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <Zap className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-primary">SQL Result</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={copyToClipboard}
-              disabled={!output}
-              className={cn(
-                "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                copied && "text-green-500 hover:text-green-500"
-              )}
-            >
-              {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-              {copied ? "Copied" : "Copy Style"}
-            </Button>
-          </div>
-          
-          <CardContent className="p-0 flex-1 relative bg-primary/[0.01]">
-            {error ? (
-              <div className="p-8 h-full bg-destructive/5 text-destructive font-mono text-sm space-y-4">
-                <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-[10px]">
-                  <AlertCircle className="w-3 h-3" />
-                  Format Error
-                </div>
-                <div className="bg-destructive/10 p-4 rounded-xl border border-destructive/20 whitespace-pre-wrap leading-relaxed">
-                  {error}
-                </div>
-              </div>
-            ) : (
-              <pre className="w-full h-full min-h-[400px] p-8 font-mono text-xs leading-relaxed overflow-auto whitespace-pre selection:bg-primary/20 text-foreground/80">
-                {output || <span className="text-muted-foreground italic opacity-50">SQL INSERT will appear here...</span>}
-              </pre>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      <OptionsLayout options={options}>
+        <ToolPanel title="JSON">
+          <CodeArea value={input} onChange={(e) => setInput(e.target.value)} minHeight={220} placeholder='[{"id": 1, "name": "…"}]' />
+        </ToolPanel>
+        {result && "error" in result && <ToolAlert tone="error">{result.error}</ToolAlert>}
+        {result && "ddl" in result && (
+          <CodeOutput
+            title={`SQL · ${result.rows} rows × ${result.cols} columns`}
+            tabs={[
+              { id: "all", label: "Full script", code: create ? `${result.ddl}\n\n${result.inserts}` : result.inserts ?? "" },
+              { id: "ddl", label: "CREATE TABLE", code: result.ddl ?? "" },
+              { id: "ins", label: "INSERT", code: result.inserts ?? "" },
+            ]}
+          />
+        )}
+      </OptionsLayout>
     </ToolLayout>
   );
 }

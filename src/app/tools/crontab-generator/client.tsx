@@ -1,234 +1,143 @@
 "use client";
 
-import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { 
-  Clock, 
-  Copy, 
-  Check, 
-  RefreshCw,
-  Terminal,
-  Calendar,
-  Zap,
-  Info,
-  ChevronDown
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useState } from "react";
+import { CronExpressionParser } from "cron-parser";
 import cronstrue from "cronstrue";
+import { ToolLayout } from "@/components/tool-layout";
+import { Input } from "@/components/ui/input";
+import { CopyButton, OptionsLayout, Segmented, StatusBadge, ToolAlert, ToolPanel, Toggle } from "@/components/tool";
+import { useMounted } from "@/lib/local-store";
+import { cn } from "@/lib/utils";
 
-type CronPart = "minute" | "hour" | "day" | "month" | "weekday";
+const PRESETS: [string, string][] = [
+  ["Every minute", "* * * * *"],
+  ["Every 5 minutes", "*/5 * * * *"],
+  ["Every 15 minutes", "*/15 * * * *"],
+  ["Hourly", "0 * * * *"],
+  ["Daily at midnight", "0 0 * * *"],
+  ["Daily at 09:00", "0 9 * * *"],
+  ["Weekdays at 09:00", "0 9 * * 1-5"],
+  ["Every Monday", "0 0 * * 1"],
+  ["1st of month", "0 0 1 * *"],
+  ["Every quarter", "0 0 1 */3 *"],
+  ["Yearly (Jan 1)", "0 0 1 1 *"],
+  ["Business hours, every 30 min", "*/30 9-17 * * 1-5"],
+];
 
-interface CronOption {
-  label: string;
-  value: string;
+const FIELDS = [
+  { key: "min", label: "Minute", range: "0–59", hint: "*/5 · 0,30 · 10-20" },
+  { key: "hour", label: "Hour", range: "0–23", hint: "9-17 · */2" },
+  { key: "dom", label: "Day of month", range: "1–31", hint: "1 · 1,15 · L" },
+  { key: "mon", label: "Month", range: "1–12", hint: "*/3 · JAN-MAR" },
+  { key: "dow", label: "Day of week", range: "0–6 (Sun=0)", hint: "1-5 · MON,WED" },
+] as const;
+
+const MACROS: Record<string, string> = { "@yearly": "0 0 1 1 *", "@annually": "0 0 1 1 *", "@monthly": "0 0 1 * *", "@weekly": "0 0 * * 0", "@daily": "0 0 * * *", "@midnight": "0 0 * * *", "@hourly": "0 * * * *" };
+
+function evaluate(expr: string, utc: boolean, h24: boolean, withRuns: boolean): { error: string } | { text: string; next: Date[] } {
+  if (!expr) return { error: "Enter a cron expression." };
+  try {
+    const it = CronExpressionParser.parse(expr, utc ? { tz: "UTC" } : {});
+    const next = withRuns ? Array.from({ length: 10 }, () => it.next().toDate()) : [];
+    return { next, text: cronstrue.toString(expr, { use24HourTimeFormat: h24, verbose: true }) };
+  } catch (e) {
+    return { error: (e as Error).message.replace(/^Error: /, "") };
+  }
 }
 
 export default function CrontabGenerator() {
-  const [cron, setCron] = useState({
-    minute: "*",
-    hour: "*",
-    day: "*",
-    month: "*",
-    weekday: "*",
-  });
-  const [expression, setExpression] = useState("* * * * *");
-  const [description, setDescription] = useState("");
-  const [copied, setCopied] = useState(false);
+  const mounted = useMounted();
+  const [expr, setExpr] = useState("*/15 9-17 * * 1-5");
+  const [h24, setH24] = useState(true);
+  const [utc, setUtc] = useState(false);
+  const [command, setCommand] = useState("/usr/local/bin/backup.sh");
 
-  useEffect(() => {
-    const exp = `${cron.minute} ${cron.hour} ${cron.day} ${cron.month} ${cron.weekday}`;
-    setExpression(exp);
-    try {
-      setDescription(cronstrue.toString(exp));
-    } catch (e) {
-      setDescription("Invalid expression");
-    }
-  }, [cron]);
+  const normalized = MACROS[expr.trim().toLowerCase()] ?? expr.trim().replace(/\s+/g, " ");
+  const parts = normalized.split(" ");
+  const withSeconds = parts.length === 6;
+  const fields = withSeconds ? parts.slice(1) : parts;
 
-  const updateCron = (part: CronPart, value: string) => {
-    setCron(prev => ({ ...prev, [part]: value }));
+  const result = evaluate(normalized, utc, h24, mounted);
+
+  const setField = (i: number, v: string) => {
+    const f = [...fields];
+    while (f.length < 5) f.push("*");
+    f[i] = v.replace(/\s+/g, "") || "*";
+    setExpr((withSeconds ? [parts[0], ...f] : f).join(" "));
   };
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(expression);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const fmt = (d: Date) =>
+    d.toLocaleString(undefined, { weekday: "short", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: withSeconds ? "2-digit" : undefined, hour12: !h24, timeZone: utc ? "UTC" : undefined });
 
-  const commonPresets = [
-    { label: "Every Minute", value: "* * * * *" },
-    { label: "Every Hour", value: "0 * * * *" },
-    { label: "Every Day at Midnight", value: "0 0 * * *" },
-    { label: "Every Sunday", value: "0 0 * * 0" },
-    { label: "Every Month (1st)", value: "0 0 1 * *" },
-  ];
+  const line = `${normalized} ${command}`.trim();
+  const zone = mounted ? (utc ? "UTC" : Intl.DateTimeFormat().resolvedOptions().timeZone) : "";
 
-  const applyPreset = (preset: string) => {
-    const [minute, hour, day, month, weekday] = preset.split(" ");
-    setCron({ minute, hour, day, month, weekday });
-  };
-
-  const CronField = ({ label, value, options, part }: { label: string, value: string, options: CronOption[], part: CronPart }) => (
-    <div className="space-y-3">
-      <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">{label}</Label>
-      <div className="relative group">
-        <select 
-          value={value}
-          onChange={(e) => updateCron(part, e.target.value)}
-          className="w-full h-12 px-4 rounded-xl bg-muted/30 border border-border/40 font-mono text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer transition-all hover:bg-muted/50"
-        >
-          {options.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-          {!options.find(o => o.value === value) && <option value={value}>{value}</option>}
-        </select>
-        <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none group-hover:text-primary transition-colors" />
-      </div>
-    </div>
+  const options = (
+    <ToolPanel title="Presets" bodyClassName="p-1.5">
+      <ul className="space-y-0.5">
+        {PRESETS.map(([label, e]) => (
+          <li key={e}>
+            <button type="button" onClick={() => setExpr(e)} className={cn("w-full flex items-center justify-between gap-2 h-8 px-2.5 rounded-md text-[13px] text-left", normalized === e ? "bg-accent text-accent-foreground" : "hover:bg-muted")}>
+              <span className="truncate">{label}</span>
+              <code className="font-mono text-[11px] text-muted-foreground">{e}</code>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </ToolPanel>
   );
 
   return (
     <ToolLayout toolId="crontab-generator">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Editor Panel */}
-        <div className="lg:col-span-8 space-y-8">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-                <CronField 
-                  label="Minute" 
-                  value={cron.minute} 
-                  part="minute"
-                  options={[
-                    { label: "Every minute (*)", value: "*" },
-                    { label: "Every 5 minutes (*/5)", value: "*/5" },
-                    { label: "Every 15 minutes (*/15)", value: "*/15" },
-                    { label: "At :00", value: "0" },
-                    { label: "At :30", value: "30" },
-                  ]}
-                />
-                <CronField 
-                  label="Hour" 
-                  value={cron.hour} 
-                  part="hour"
-                  options={[
-                    { label: "Every hour (*)", value: "*" },
-                    { label: "Every 2 hours (*/2)", value: "*/2" },
-                    { label: "At midnight (0)", value: "0" },
-                    { label: "At noon (12)", value: "12" },
-                  ]}
-                />
-                <CronField 
-                  label="Day of Month" 
-                  value={cron.day} 
-                  part="day"
-                  options={[
-                    { label: "Every day (*)", value: "*" },
-                    { label: "1st day of month (1)", value: "1" },
-                    { label: "15th day of month (15)", value: "15" },
-                    { label: "Last day of month (L)", value: "L" },
-                  ]}
-                />
-                <CronField 
-                  label="Month" 
-                  value={cron.month} 
-                  part="month"
-                  options={[
-                    { label: "Every month (*)", value: "*" },
-                    { label: "January (1)", value: "1" },
-                    { label: "July (7)", value: "7" },
-                    { label: "December (12)", value: "12" },
-                  ]}
-                />
-                <CronField 
-                  label="Day of Week" 
-                  value={cron.weekday} 
-                  part="weekday"
-                  options={[
-                    { label: "Every day (*)", value: "*" },
-                    { label: "Mon-Fri (1-5)", value: "1-5" },
-                    { label: "Sat-Sun (0,6)", value: "0,6" },
-                    { label: "Sunday (0)", value: "0" },
-                  ]}
-                />
-              </div>
-
-              <div className="pt-6 border-t border-border/40">
-                <div className="flex items-center gap-2 mb-4">
-                  <Calendar className="w-4 h-4 text-primary" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Presets</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {commonPresets.map((preset) => (
-                    <Button
-                      key={preset.value}
-                      variant="outline"
-                      size="sm"
-                      onClick={() => applyPreset(preset.value)}
-                      className="rounded-xl text-[10px] font-bold border-border/40 hover:bg-primary/5 hover:text-primary transition-all"
-                    >
-                      {preset.label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 flex items-start gap-4">
-            <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
-              <Zap className="w-5 h-5" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="font-bold text-sm text-primary">Human Readable Description</h3>
-              <p className="text-lg font-bold text-foreground leading-snug">
-                "{description}"
-              </p>
-            </div>
+      <OptionsLayout options={options}>
+        <ToolPanel bodyClassName="p-3.5 space-y-3">
+          <div className="flex gap-2">
+            <Input value={expr} onChange={(e) => setExpr(e.target.value)} spellCheck={false} className="h-12 text-xl font-mono tracking-wide" aria-label="Cron expression" aria-invalid={"error" in result ? true : undefined} />
+            <CopyButton text={normalized} className="h-12" />
           </div>
-        </div>
+          {"text" in result ? (
+            <p className="text-base font-medium">“{result.text}”</p>
+          ) : (
+            <p className="text-sm text-destructive">{result.error}</p>
+          )}
+          {/* Individual field editors — hoisted JSX, not nested components, so inputs keep focus. */}
+          <div className="grid grid-cols-5 gap-2">
+            {FIELDS.map((f, i) => (
+              <label key={f.key} className="space-y-1 min-w-0">
+                <span className="block text-[11px] font-medium truncate">{f.label}</span>
+                <Input value={fields[i] ?? ""} onChange={(e) => setField(i, e.target.value)} spellCheck={false} className="font-mono text-center" />
+                <span className="block text-[10px] text-muted-foreground truncate" title={f.hint}>{f.range}</span>
+              </label>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <Segmented size="sm" value={h24 ? "24" : "12"} onChange={(v) => setH24(v === "24")} options={[{ value: "24", label: "24 h" }, { value: "12", label: "12 h" }]} />
+            <Toggle label="Evaluate in UTC" checked={utc} onChange={setUtc} hint="Servers usually run cron in UTC" />
+            {withSeconds && <StatusBadge tone="info">6-field (with seconds)</StatusBadge>}
+          </div>
+        </ToolPanel>
 
-        {/* Results Panel */}
-        <div className="lg:col-span-4 space-y-6">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center gap-3">
-              <Terminal className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Cron Expression</span>
-            </div>
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-4">
-                <div className="h-24 px-6 rounded-2xl bg-primary/5 border border-primary/10 flex items-center justify-center">
-                  <span className="text-3xl font-mono font-bold text-primary tracking-wider">{expression}</span>
-                </div>
-                <Button 
-                  onClick={copyToClipboard}
-                  className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-                >
-                  {copied ? <Check className="w-5 h-5 mr-2" /> : <Copy className="w-5 h-5 mr-2" />}
-                  {copied ? "Copied!" : "Copy Expression"}
-                </Button>
-              </div>
+        {"next" in result && result.next.length > 0 && (
+          <ToolPanel title={`Next ${result.next.length} runs`} actions={<StatusBadge>{zone}</StatusBadge>}>
+            <ol className="divide-y divide-border">
+              {result.next.map((d, i) => (
+                <li key={i} className="flex items-center gap-3 px-3.5 h-9 text-[13px]">
+                  <span className="w-5 text-right text-[11px] text-muted-foreground tabular-nums">{i + 1}</span>
+                  <span className="font-mono tabular-nums">{fmt(d)}</span>
+                </li>
+              ))}
+            </ol>
+          </ToolPanel>
+        )}
 
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Info className="w-3 h-3 text-muted-foreground" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Example usage</span>
-                </div>
-                <div className="p-4 rounded-xl bg-muted/50 border border-border/40 font-mono text-[11px] leading-relaxed">
-                  # Runs {description.toLowerCase()}
-                  <br />
-                  {expression} /path/to/command.sh
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+        <ToolPanel title="Crontab line" actions={<CopyButton text={line} />} bodyClassName="p-3.5 space-y-2">
+          <Input value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Command to run" className="font-mono" aria-label="Command" />
+          <pre className="font-mono text-[13px] bg-muted/50 rounded-md px-3 py-2 overflow-x-auto">{line}</pre>
+          <p className="text-[11px] text-muted-foreground">Add with <code className="font-mono">crontab -e</code>. Use absolute paths — cron runs with a minimal PATH.</p>
+        </ToolPanel>
+
+        {"error" in result && normalized && <ToolAlert tone="error" title="Invalid expression">{result.error}</ToolAlert>}
+      </OptionsLayout>
     </ToolLayout>
   );
 }

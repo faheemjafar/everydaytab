@@ -1,53 +1,83 @@
 "use client";
 
-import React, { useState } from "react";
+import { useMemo, useState } from "react";
 import { ToolLayout } from "@/components/tool-layout";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Eraser, Copy, CheckCircle2, Trash2, FileCode, Zap } from "lucide-react";
+import { Field, Segmented, TextTransform, Toggle } from "@/components/tool";
 
-export default function StripHtml() {
-  const [input, setInput] = useState("");
-  const [output, setOutput] = useState("");
-  const [copied, setCopied] = useState(false);
+const SAMPLE = `<article>
+  <h1>Hello &amp; welcome</h1>
+  <p>This is <strong>bold</strong>, this is a <a href="https://example.com">link</a>.</p>
+  <ul><li>First item</li><li>Second&nbsp;item</li></ul>
+  <script>alert("removed")</script>
+  <style>p { color: red }</style>
+  <p>Caf&eacute; &mdash; &lt;tags&gt; stay as text.</p>
+</article>`;
 
-  const strip = () => {
-    if (!input) { setOutput(""); return; }
-    const temp = document.createElement("div");
-    temp.innerHTML = input;
-    setOutput(temp.textContent || temp.innerText || "");
+const BLOCK = new Set(["P", "DIV", "SECTION", "ARTICLE", "HEADER", "FOOTER", "MAIN", "ASIDE", "NAV", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "LI", "TR", "TABLE", "BLOCKQUOTE", "PRE", "FIGURE", "FIGCAPTION", "DT", "DD", "HR", "FORM"]);
+
+type Links = "text" | "text-url" | "markdown";
+
+/** Walks the parsed DOM so entities decode correctly and block elements become line breaks. */
+function toText(html: string, o: { breaks: boolean; links: Links; bullets: boolean; collapse: boolean }) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  doc.querySelectorAll("script, style, noscript, template, head, svg").forEach((n) => n.remove());
+  let out = "";
+  const walk = (n: Node) => {
+    if (n.nodeType === Node.TEXT_NODE) {
+      out += n.textContent ?? "";
+      return;
+    }
+    if (n.nodeType !== Node.ELEMENT_NODE) return;
+    const el = n as Element;
+    const block = o.breaks && BLOCK.has(el.tagName);
+    if (el.tagName === "BR") { out += "\n"; return; }
+    if (block) out += "\n";
+    if (el.tagName === "LI" && o.bullets) out += el.parentElement?.tagName === "OL" ? `${Array.from(el.parentElement.children).indexOf(el) + 1}. ` : "• ";
+    if (el.tagName === "TD" || el.tagName === "TH") out += "\t";
+    const href = el.tagName === "A" ? el.getAttribute("href") : null;
+    if (href && o.links === "markdown") out += "[";
+    el.childNodes.forEach(walk);
+    if (href && o.links === "markdown") out += `](${href})`;
+    else if (href && o.links === "text-url" && href !== el.textContent) out += ` (${href})`;
+    if (block) out += "\n";
   };
+  walk(doc.body);
+  if (o.collapse) out = out.replace(/[ \t\u00a0]+/g, " ").replace(/ *\n */g, "\n");
+  return out.replace(/\n{3,}/g, "\n\n").trim();
+}
 
-  const copyToClipboard = async () => { if (!output) return; try { await navigator.clipboard.writeText(output); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (err) { console.error(err); } };
-  const clearAll = () => { setInput(""); setOutput(""); };
+export default function StripHTML() {
+  const [input, setInput] = useState("");
+  const [breaks, setBreaks] = useState(true);
+  const [bullets, setBullets] = useState(true);
+  const [collapse, setCollapse] = useState(true);
+  const [links, setLinks] = useState<Links>("text");
+
+  const output = useMemo(() => (typeof DOMParser !== "undefined" && input ? toText(input, { breaks, links, bullets, collapse }) : ""), [input, breaks, links, bullets, collapse]);
 
   return (
     <ToolLayout toolId="strip-html">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-8 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><FileCode className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">HTML Input</span></div>
-              <CardContent className="p-6"><textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="<p>This is <b>HTML</b> content.</p>" rows={16} className="w-full px-4 py-4 bg-muted/30 border-transparent rounded-2xl focus:border-primary/20 text-sm font-mono text-foreground leading-relaxed resize-none placeholder:font-normal" /></CardContent>
-            </Card>
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><Eraser className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Plain Text</span></div>
-              <CardContent className="p-6"><textarea value={output} readOnly placeholder="Plain text will appear here..." rows={16} className="w-full px-4 py-4 bg-muted/30 border-transparent rounded-2xl text-sm font-medium text-foreground leading-relaxed resize-none placeholder:font-normal" /></CardContent>
-            </Card>
-          </div>
-        </div>
-
-        <div className="lg:col-span-4 space-y-6 sticky top-24">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><Zap className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Actions</span></div>
-            <CardContent className="p-8 space-y-3">
-              <Button onClick={strip} className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"><Eraser className="w-5 h-5 mr-2" /> Strip HTML</Button>
-              <Button onClick={copyToClipboard} disabled={!output} variant="outline" className="w-full h-12 rounded-xl border-border/50 font-bold text-muted-foreground">{copied ? <CheckCircle2 className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}{copied ? "Copied!" : "Copy Result"}</Button>
-              <Button onClick={clearAll} variant="outline" className="w-full h-12 rounded-xl border-border/50 font-bold text-muted-foreground"><Trash2 className="w-4 h-4 mr-2" /> Clear All</Button>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      <TextTransform
+        input={input}
+        onInput={setInput}
+        output={output}
+        sample={SAMPLE}
+        inputLabel="HTML"
+        outputLabel="Plain text"
+        filename="text.txt"
+        placeholder="Paste HTML, an email source or a web page's markup…"
+        options={
+          <>
+            <Toggle label="Keep paragraphs & line breaks" checked={breaks} onChange={setBreaks} />
+            <Toggle label="List bullets" checked={bullets} onChange={setBullets} />
+            <Toggle label="Collapse whitespace" checked={collapse} onChange={setCollapse} />
+            <Field label="Links">
+              <Segmented size="sm" value={links} onChange={setLinks} options={[{ value: "text", label: "Text only" }, { value: "text-url", label: "Text (URL)" }, { value: "markdown", label: "[Markdown](url)" }]} />
+            </Field>
+            <p className="text-[11px] text-muted-foreground">Scripts, styles and hidden templates are dropped; entities like &amp;amp; and &amp;eacute; are decoded.</p>
+          </>
+        }
+      />
     </ToolLayout>
   );
 }
