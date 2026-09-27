@@ -10,6 +10,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Category colour: each category in `src/lib/tools.ts` has a `hue`; use `style={categoryStyle(cat)}` + class `cat-chip` on icon containers.
 - Shell: `src/components/shell/*` (icon `Rail` → hover/pinned `Flyout`, `TopBar`, `MobileNav`, `AppShell`). User prefs: `useSettings()` (`src/hooks/use-settings.ts`), favorites/recents: `usePersistentTools()`. Both are localStorage-backed `useSyncExternalStore` stores (`src/lib/local-store.ts`).
 - Tool pages: wrap in `ToolLayout` and build the workspace from `src/components/tool/*` (`ToolPanel`, `SplitLayout`, `OptionsLayout`, `CodeArea`, `FileDropzone`, `FileList`, `Field`, `Segmented`, `Stat`, `CopyButton`, `DownloadButton`, `ClearButton`, `StatusBadge`, `ToolAlert`, `PrivacyNote`). Reference migrations: json-formatter, merge-pdf, qr-generator, regex, image-compressor, timestamp-converter.
+- Category scaffolds (use these before hand-rolling layouts):
+  - Single-PDF tools: `usePdfFile` + `<PdfTool>`; pages via `<PagePicker>`, text placement via `placeText`, rasterising via `rasterizePages` (output page size = `RasterPage.width/height` in points, never canvas pixels). Reference: split-pdf, page-numbers, compress-pdf.
+  - Single-image tools: `useImageFile` + `<ImageTool>` (+ `FormatQuality`, `drawToCanvas`, `canvasToBlob`). Always process from the original `image.img`, not a previous result. Reference: image-resize, image-cropper.
+  - Visual generators: `OptionsLayout` + `SliderField` / `ColorField` + preview `ToolPanel` + `<CodeOutput>` tabs (CSS / Tailwind …). Reference: box-shadow, gradient-studio.
+- Never load remote assets (images, fonts, APIs) from a tool — everything must work offline and nothing may leave the device.
 - Exactly one primary action per tool uses `<Button size="lg">`; everything else is default/`sm`. Avoid `rounded-[2rem]`, `backdrop-blur`, `shadow-*` and per-tool colour palettes.
 - Lint uses the React Compiler rules: no `setState` synchronously inside effects (derive from a key/pathname instead), no `Date.now()`/`Math.random()` during render.
 - Verify with `npx tsc --noEmit -p .`, `npx eslint <paths>`, `npx next build`.
