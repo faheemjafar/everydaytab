@@ -1,84 +1,94 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
+import { colorsNamed, parse } from "culori";
+import tailwind from "tailwindcss/colors";
 import { ToolLayout } from "@/components/tool-layout";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Type, Copy, CheckCircle2, Zap, Search } from "lucide-react";
-import { colorsNamed } from "culori";
+import { CopyButton, OptionsLayout, StatusBadge, ToolPanel } from "@/components/tool";
+import { deltaE, hex, parseColor, readableText, toOklch } from "@/lib/color";
+import type { Color } from "culori";
 
-const namedColors: { name: string; hex: string }[] = Object.entries(colorsNamed).map(([name, value]) => ({
-  name,
-  hex: `#${(value as number).toString(16).padStart(6, "0")}`,
-}));
+const CSS = Object.keys(colorsNamed).map((name) => ({ name, value: parse(name)!, label: name }));
+const TW = Object.entries(tailwind as unknown as Record<string, Record<string, string> | string>)
+  .filter(([, v]) => typeof v === "object")
+  .flatMap(([family, shades]) => Object.entries(shades as Record<string, string>).map(([shade, v]) => ({ name: `${family}-${shade}`, value: parse(v)!, label: `${family}-${shade}` })))
+  .filter((x) => x.value);
 
-const hexToRgb = (hex: string) => { const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : null; };
+// OKLCH hue bands (degrees), calibrated on reference colours: red ≈ 29°, orange ≈ 70°, yellow ≈ 110°, green ≈ 142°, cyan ≈ 195°, blue ≈ 264°, purple ≈ 328°, pink ≈ 354°.
+const HUES: [number, string][] = [[15, "pink"], [45, "red"], [85, "orange"], [100, "amber"], [120, "yellow"], [135, "yellow-green"], [175, "green"], [200, "teal"], [230, "cyan"], [272, "blue"], [295, "indigo"], [338, "purple"], [361, "pink"]];
+
+/** Plain-English description from OKLCH: e.g. "dark, muted teal". */
+function describe(c: Color) {
+  const { l, c: ch, h } = toOklch(c);
+  if (ch < 0.03) return l > 0.95 ? "white" : l < 0.18 ? "black" : l > 0.7 ? "light grey" : l < 0.4 ? "dark grey" : "grey";
+  const hue = HUES.find(([max]) => (h ?? 0) < max)?.[1] ?? "red";
+  const light = l > 0.85 ? "very light" : l > 0.7 ? "light" : l < 0.3 ? "very dark" : l < 0.45 ? "dark" : "";
+  const sat = ch < 0.07 ? "muted" : ch > 0.18 ? "vivid" : "";
+  const brownish = (hue === "orange" || hue === "amber") && l < 0.55 && ch < 0.15;
+  return [light, sat, brownish ? "brown" : hue].filter(Boolean).join(" ");
+}
+
+function top(c: Color, list: typeof CSS, n: number) {
+  return list.map((x) => ({ ...x, d: deltaE(c, x.value) })).sort((a, b) => a.d - b.d).slice(0, n);
+}
+
+const match = (d: number) => (d < 1 ? "Exact match" : d < 3 ? "Very close" : d < 6 ? "Close" : "Nearest");
 
 export default function ColorNameFinder() {
-  const [color, setColor] = useState("#3f51b5");
-  const [copied, setCopied] = useState(false);
+  const [input, setInput] = useState("#3f51b5");
+  const c = useMemo(() => parseColor(input), [input]);
+  const css = c ? top(c, CSS, 6) : [];
+  const tw = c ? top(c, TW, 6) : [];
+  const h = c ? hex(c) : "#000000";
 
-  const matches = useMemo(() => {
-    const rgb = hexToRgb(color); if (!rgb) return [] as { name: string; hex: string; dist: number }[];
-    return namedColors
-      .map(c => { const crgb = hexToRgb(c.hex)!; return { ...c, dist: Math.sqrt(Math.pow(rgb.r - crgb.r, 2) + Math.pow(rgb.g - crgb.g, 2) + Math.pow(rgb.b - crgb.b, 2)) }; })
-      .sort((a, b) => a.dist - b.dist)
-      .slice(0, 6);
-  }, [color]);
-  const closestName = matches[0]?.name ?? "Custom";
-  const closestHex = matches[0]?.hex ?? color;
+  const options = (
+    <ToolPanel title="Colour" bodyClassName="p-3 space-y-3">
+      <div className="flex gap-1.5">
+        <input type="color" value={h} onChange={(e) => setInput(e.target.value)} aria-label="Pick colour" className="h-(--control-h) w-10 shrink-0 rounded-md border border-input bg-card p-0.5 cursor-pointer" />
+        <Input value={input} onChange={(e) => setInput(e.target.value)} spellCheck={false} className="font-mono" autoFocus aria-invalid={input.trim() && !c ? true : undefined} />
+      </div>
+      {input.trim() && !c && <p className="text-xs text-destructive">Unrecognised colour.</p>}
+      <p className="text-[11px] text-muted-foreground">Accepts HEX, RGB, HSL, OKLCH or any CSS colour. Matching uses CIEDE2000 — how different colours look to people, not raw RGB distance.</p>
+    </ToolPanel>
+  );
 
-  const copyToClipboard = async () => { try { await navigator.clipboard.writeText(color); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (err) { console.error(err); } };
+  const list = (title: string, items: ReturnType<typeof top>, prefix = "") => (
+    <ToolPanel title={title}>
+      <ul className="divide-y divide-border">
+        {items.map((x, i) => (
+          <li key={x.name} className="group flex items-center gap-3 px-3.5 h-11">
+            <span className="w-8 h-8 rounded-md border border-border shrink-0" style={{ background: hex(x.value) }} />
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-medium truncate">{prefix}{x.label}</p>
+              <p className="text-[11px] text-muted-foreground font-mono">{hex(x.value)} · ΔE {x.d.toFixed(1)}</p>
+            </div>
+            {i === 0 && <StatusBadge tone={x.d < 3 ? "success" : "neutral"}>{match(x.d)}</StatusBadge>}
+            <CopyButton text={`${prefix}${x.label}`} iconOnly className="opacity-0 group-hover:opacity-100 focus:opacity-100" />
+          </li>
+        ))}
+      </ul>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="color-name-finder">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-8 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center gap-3"><Type className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Pick a Color</span></div>
-            <CardContent className="p-8 space-y-4">
-              <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="w-full h-24 rounded-2xl cursor-pointer" />
-              <Input type="text" value={color} onChange={(e) => setColor(e.target.value)} className="h-14 px-4 rounded-xl bg-muted/30 border-transparent focus:border-primary/20 text-sm font-mono font-bold text-center uppercase" />
-            </CardContent>
-          </Card>
-          <div className="h-40 rounded-[2.5rem] border border-border shadow-sm" style={{ backgroundColor: color }} />
-        </div>
-
-        <div className="lg:col-span-4 space-y-6 sticky top-24">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><Zap className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Actions</span></div>
-            <CardContent className="p-8">
-              <Button onClick={copyToClipboard} className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]">{copied ? <CheckCircle2 className="w-5 h-5 mr-2" /> : <Copy className="w-5 h-5 mr-2" />}{copied ? "Copied!" : "Copy Hex"}</Button>
-            </CardContent>
-          </Card>
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><Search className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Closest Match</span></div>
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4 p-4 bg-muted/30 rounded-xl border border-border">
-                <div className="w-14 h-14 rounded-xl border border-border shadow-sm flex-shrink-0" style={{ backgroundColor: closestHex }} />
-                <div>
-                  <p className="text-lg font-black text-foreground">{closestName}</p>
-                  <p className="text-xs text-muted-foreground font-mono font-bold">{closestHex}</p>
-                </div>
+      <OptionsLayout options={options}>
+        {c && (
+          <>
+            <ToolPanel bodyClassName="p-0">
+              <div className="h-36 flex flex-col justify-end p-4" style={{ background: h, color: readableText(c) }}>
+                <p className="text-3xl font-semibold capitalize">{css[0]?.name}</p>
+                <p className="text-sm opacity-80">{describe(c)} · {h}</p>
               </div>
-              {matches.length > 1 && (
-                <ul className="mt-4 space-y-1.5">
-                  {matches.slice(1).map(m => (
-                    <li key={m.name}>
-                      <button type="button" onClick={() => setColor(m.hex)} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted/40 transition-colors text-left" title={`Use ${m.name}`}>
-                        <span className="w-7 h-7 rounded-md border border-border shrink-0" style={{ backgroundColor: m.hex }} />
-                        <span className="flex-1 min-w-0"><span className="block text-sm font-semibold truncate">{m.name}</span><span className="block text-[11px] font-mono text-muted-foreground">{m.hex}</span></span>
-                        <span className="text-[10px] text-muted-foreground font-bold">Δ{m.dist.toFixed(0)}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            </ToolPanel>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {list("CSS named colours", css)}
+              {list("Tailwind CSS palette", tw, "")}
+            </div>
+          </>
+        )}
+      </OptionsLayout>
     </ToolLayout>
   );
 }
