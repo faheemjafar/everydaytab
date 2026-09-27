@@ -1,194 +1,133 @@
 "use client";
 
-import { ToolLayout } from "@/components/tool-layout";
-
 import { useState } from "react";
+import { KeyRound, RefreshCw } from "lucide-react";
+import { ToolLayout } from "@/components/tool-layout";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { 
-  Key, 
-  Copy, 
-  Check, 
-  RefreshCw,
-  Zap,
-  ShieldCheck,
-  Info,
-  Download,
-  Lock,
-  Unlock
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import forge from "node-forge";
+import { Input } from "@/components/ui/input";
+import { CopyButton, DownloadButton, Field, OptionsLayout, PrivacyNote, Segmented, StatusBadge, ToolAlert, ToolPanel } from "@/components/tool";
+
+type Size = "2048" | "3072" | "4096";
+type Use = "RSA-OAEP" | "RSASSA-PKCS1-v1_5" | "RSA-PSS";
+
+const USES: Record<Use, { label: string; usages: KeyUsage[]; hint: string }> = {
+  "RSASSA-PKCS1-v1_5": { label: "Signing (RS256)", usages: ["sign", "verify"], hint: "JWT RS256, SSH, code signing" },
+  "RSA-PSS": { label: "Signing (PS256)", usages: ["sign", "verify"], hint: "Modern signature padding" },
+  "RSA-OAEP": { label: "Encryption (OAEP)", usages: ["encrypt", "decrypt"], hint: "Encrypting small secrets" },
+};
+
+const b64 = (buf: ArrayBuffer | Uint8Array) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const pem = (label: string, der: ArrayBuffer) => `-----BEGIN ${label}-----\n${b64(der).match(/.{1,64}/g)!.join("\n")}\n-----END ${label}-----\n`;
+const fromB64url = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+
+/** OpenSSH "ssh-rsa AAAA…" public key from the JWK modulus/exponent (RFC 4253 wire format). */
+function sshPublicKey(jwk: JsonWebKey, comment: string) {
+  const mpint = (b: Uint8Array) => (b[0] & 0x80 ? Uint8Array.of(0, ...b) : b);
+  const field = (b: Uint8Array) => { const out = new Uint8Array(4 + b.length); new DataView(out.buffer).setUint32(0, b.length); out.set(b, 4); return out; };
+  const parts = [field(new TextEncoder().encode("ssh-rsa")), field(mpint(fromB64url(jwk.e!))), field(mpint(fromB64url(jwk.n!)))];
+  const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let o = 0;
+  for (const p of parts) { all.set(p, o); o += p.length; }
+  return `ssh-rsa ${b64(all)}${comment ? ` ${comment}` : ""}`;
+}
+
+async function fingerprint(spki: ArrayBuffer) {
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", spki));
+  return Array.from(h, (b) => b.toString(16).padStart(2, "0")).join(":");
+}
+
+interface Keys { publicPem: string; privatePem: string; ssh: string; jwkPublic: string; jwkPrivate: string; fp: string; ms: number }
 
 export default function RSAKeyGenerator() {
-  const [keySize, setKeySize] = useState<number>(2048);
-  const [keys, setKeys] = useState<{ public: string, private: string } | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
+  const [size, setSize] = useState<Size>("2048");
+  const [use, setUse] = useState<Use>("RSASSA-PKCS1-v1_5");
+  const [comment, setComment] = useState("");
+  const [keys, setKeys] = useState<Keys | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const generateKeys = () => {
-    setLoading(true);
-    // Use setTimeout to allow UI to update (loading state)
-    setTimeout(() => {
-      try {
-        const pair = forge.pki.rsa.generateKeyPair(keySize);
-        const publicKey = forge.pki.publicKeyToPem(pair.publicKey);
-        const privateKey = forge.pki.privateKeyToPem(pair.privateKey);
-        setKeys({ public: publicKey, private: privateKey });
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
+  const generate = async () => {
+    setBusy(true);
+    setError(null);
+    const t0 = performance.now();
+    try {
+      // WebCrypto generates keys off the main thread, so the page stays responsive.
+      const pair = await crypto.subtle.generateKey({ name: use, modulusLength: Number(size), publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, USES[use].usages);
+      const [spki, pkcs8, jwkPub, jwkPriv] = await Promise.all([
+        crypto.subtle.exportKey("spki", pair.publicKey),
+        crypto.subtle.exportKey("pkcs8", pair.privateKey),
+        crypto.subtle.exportKey("jwk", pair.publicKey),
+        crypto.subtle.exportKey("jwk", pair.privateKey),
+      ]);
+      setKeys({
+        publicPem: pem("PUBLIC KEY", spki),
+        privatePem: pem("PRIVATE KEY", pkcs8),
+        ssh: sshPublicKey(jwkPub, comment.trim()),
+        jwkPublic: JSON.stringify(jwkPub, null, 2),
+        jwkPrivate: JSON.stringify(jwkPriv, null, 2),
+        fp: await fingerprint(spki),
+        ms: performance.now() - t0,
+      });
+    } catch (e) {
+      setError((e as Error).message || "Key generation failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const options = (
+    <ToolPanel
+      title="Key"
+      bodyClassName="p-3 space-y-3"
+      footer={
+        <div className="w-full space-y-2">
+          <Button size="lg" onClick={generate} disabled={busy} className="w-full">
+            {busy ? <RefreshCw className="animate-spin" /> : <KeyRound />} {busy ? "Generating…" : keys ? "Generate new pair" : "Generate key pair"}
+          </Button>
+          <PrivacyNote>Generated with WebCrypto in this tab — never sent anywhere.</PrivacyNote>
+        </div>
       }
-    }, 100);
-  };
+    >
+      <Field label="Key size" hint={size === "2048" ? "Minimum recommended today." : size === "3072" ? "Good through 2030+ (NIST)." : "Strongest; slower to generate and use."}>
+        <Segmented value={size} onChange={setSize} options={[{ value: "2048", label: "2048" }, { value: "3072", label: "3072" }, { value: "4096", label: "4096" }]} />
+      </Field>
+      <Field label="Algorithm" hint={USES[use].hint}>
+        <Segmented size="sm" value={use} onChange={setUse} options={(Object.keys(USES) as Use[]).map((u) => ({ value: u, label: USES[u].label }))} className="flex-wrap" />
+      </Field>
+      <Field label="SSH comment" htmlFor="cm">
+        <Input id="cm" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="you@laptop" />
+      </Field>
+    </ToolPanel>
+  );
 
-  const copy = (val: string, id: string) => {
-    navigator.clipboard.writeText(val);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
-  };
-
-  const downloadKey = (val: string, filename: string) => {
-    const blob = new Blob([val], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
+  const block = (title: string, value: string, file: string, secret = false) => (
+    <ToolPanel title={title} actions={<>{secret && <StatusBadge tone="warning">keep secret</StatusBadge>}<CopyButton text={value} iconOnly /><DownloadButton content={value} filename={file} mime="text/plain" iconOnly /></>}>
+      <pre className="px-3.5 py-2.5 font-mono text-[11.5px] leading-snug break-all whitespace-pre-wrap max-h-56 overflow-auto custom-scrollbar">{value}</pre>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="rsa-generator">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Configuration Panel */}
-        <div className="lg:col-span-4 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-6">
-                <div className="flex items-center gap-2 mb-2">
-                  <ShieldCheck className="w-4 h-4 text-primary" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Key Settings</span>
-                </div>
-
-                <div className="space-y-4">
-                  <Label className="text-sm font-bold">Key Size (bits)</Label>
-                  <div className="grid grid-cols-2 gap-2 p-1 bg-muted/50 rounded-2xl border border-border/40">
-                    {[1024, 2048, 3072, 4096].map((size) => (
-                      <Button
-                        key={size}
-                        variant={keySize === size ? "default" : "ghost"}
-                        size="sm"
-                        onClick={() => setKeySize(size)}
-                        className={cn(
-                          "rounded-xl font-mono font-bold h-10",
-                          keySize === size && "shadow-md"
-                        )}
-                      >
-                        {size}
-                      </Button>
-                    ))}
-                  </div>
-                  <p className="text-[10px] text-muted-foreground italic px-1">
-                    2048-bit is standard. 4096-bit is ultra-secure but slower to generate.
-                  </p>
-                </div>
-              </div>
-
-              <Button 
-                onClick={generateKeys}
-                disabled={loading}
-                className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-              >
-                {loading ? <RefreshCw className="w-5 h-5 mr-2 animate-spin" /> : <Zap className="w-5 h-5 mr-2" />}
-                {loading ? "Generating..." : "Generate New Keys"}
-              </Button>
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Info className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Security Note</h3>
+      <OptionsLayout options={options}>
+        {error && <ToolAlert tone="error">{error}</ToolAlert>}
+        {keys ? (
+          <>
+            <p className="text-[11px] text-muted-foreground font-mono break-all">SPKI SHA-256 {keys.fp} · generated in {Math.round(keys.ms)} ms</p>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {block("Public key (PEM, SPKI)", keys.publicPem, "public.pem")}
+              {block("Private key (PEM, PKCS#8)", keys.privatePem, "private.pem", true)}
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed italic">
-              Keys are generated using the <strong>node-forge</strong> library entirely in your browser. No data ever leaves your computer.
-            </p>
-          </div>
-        </div>
-
-        {/* Output Panel */}
-        <div className="lg:col-span-8 space-y-8">
-          {keys ? (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              {/* Private Key */}
-              <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-                <div className="px-8 py-4 border-b border-border/40 bg-destructive/5 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Lock className="w-4 h-4 text-destructive" />
-                    <span className="text-xs font-bold uppercase tracking-widest text-destructive">Private Key (Keep Secret!)</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => downloadKey(keys.private, 'id_rsa')} className="h-8 rounded-xl font-bold">
-                      <Download className="w-4 h-4 mr-2" />
-                      Save
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => copy(keys.private, 'private')} className="h-8 rounded-xl font-bold">
-                      {copied === 'private' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                    </Button>
-                  </div>
-                </div>
-                <CardContent className="p-6">
-                  <pre className="text-[10px] font-mono text-destructive/80 leading-relaxed overflow-auto max-h-[250px] bg-destructive/[0.02] p-4 rounded-xl">
-                    {keys.private}
-                  </pre>
-                </CardContent>
-              </Card>
-
-              {/* Public Key */}
-              <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-                <div className="px-8 py-4 border-b border-border/40 bg-green-500/5 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Unlock className="w-4 h-4 text-green-600" />
-                    <span className="text-xs font-bold uppercase tracking-widest text-green-600">Public Key (Safe to Share)</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => downloadKey(keys.public, 'id_rsa.pub')} className="h-8 rounded-xl font-bold">
-                      <Download className="w-4 h-4 mr-2" />
-                      Save
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => copy(keys.public, 'public')} className="h-8 rounded-xl font-bold">
-                      {copied === 'public' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                    </Button>
-                  </div>
-                </div>
-                <CardContent className="p-6">
-                  <pre className="text-[10px] font-mono text-green-600/80 leading-relaxed overflow-auto max-h-[150px] bg-green-500/[0.02] p-4 rounded-xl">
-                    {keys.public}
-                  </pre>
-                </CardContent>
-              </Card>
+            {block("OpenSSH public key (authorized_keys)", keys.ssh, "id_rsa.pub")}
+            <div className="grid gap-3 lg:grid-cols-2">
+              {block("Public JWK", keys.jwkPublic, "public.jwk.json")}
+              {block("Private JWK", keys.jwkPrivate, "private.jwk.json", true)}
             </div>
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center p-12 text-center space-y-6 bg-muted/20 rounded-[2.5rem] border border-dashed border-border/40 min-h-[500px]">
-              <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center">
-                <Key className="w-10 h-10 text-muted-foreground/30" />
-              </div>
-              <div className="space-y-2">
-                <h3 className="font-bold text-lg">No Keys Generated</h3>
-                <p className="text-sm text-muted-foreground max-w-xs">
-                  Select a key size and click "Generate New Keys" to create your RSA pair.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+            <p className="text-[11px] text-muted-foreground">For SSH logins prefer Ed25519 (<code className="font-mono">ssh-keygen -t ed25519</code>) and generate keys on the machine that will use them.</p>
+          </>
+        ) : (
+          <ToolPanel bodyClassName="px-4 py-12 text-center text-sm text-muted-foreground">Choose a size and generate a key pair. Output includes PEM, OpenSSH and JWK formats.</ToolPanel>
+        )}
+      </OptionsLayout>
     </ToolLayout>
   );
 }

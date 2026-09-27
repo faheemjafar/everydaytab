@@ -1,204 +1,98 @@
 "use client";
 
-import { ToolLayout } from "@/components/tool-layout";
-
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  ShieldCheck, 
-  Copy, 
-  Check, 
-  Trash2,
-  Lock,
-  Unlock,
-  Zap,
-  Info,
-  ShieldAlert,
-  Fingerprint,
-  RefreshCw
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useEffect, useState } from "react";
 import bcrypt from "bcryptjs";
+import { Check, Hash, RefreshCw, X } from "lucide-react";
+import { ToolLayout } from "@/components/tool-layout";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { CopyButton, Field, SliderField, SplitLayout, StatusBadge, ToolPanel } from "@/components/tool";
+
+/** Splits a bcrypt hash into its parts: $2b$10$<22-char salt><31-char hash>. */
+function anatomy(h: string) {
+  const m = h.match(/^\$(2[abxy]?)\$(\d{2})\$(.{22})(.{31})$/);
+  return m ? { version: m[1], cost: Number(m[2]), salt: m[3], hash: m[4] } : null;
+}
 
 export default function BcryptHash() {
-  const [input, setInput] = useState("");
-  const [rounds, setRounds] = useState(10);
-  const [hash, setHash] = useState("");
-  const [compareHash, setCompareHash] = useState("");
-  const [isMatch, setIsMatch] = useState<boolean | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [pw, setPw] = useState("");
+  const [cost, setCost] = useState(12);
+  const [result, setResult] = useState<{ hash: string; ms: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [vPw, setVPw] = useState("");
+  const [vHash, setVHash] = useState("");
+  const [verify, setVerify] = useState<{ key: string; ok: boolean | null; ms?: number }>({ key: "", ok: null });
 
-  const generateHash = () => {
-    if (!input) return;
-    setLoading(true);
-    // Use setTimeout to allow UI to update (loading state)
-    setTimeout(() => {
-      try {
-        const salt = bcrypt.genSaltSync(rounds);
-        const result = bcrypt.hashSync(input, salt);
-        setHash(result);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
-    }, 100);
+  const hash = async () => {
+    setBusy(true);
+    const t0 = performance.now();
+    // Async API yields to the event loop, so the page doesn't freeze at high cost factors.
+    const h = await bcrypt.hash(pw, cost);
+    setResult({ hash: h, ms: performance.now() - t0 });
+    setBusy(false);
   };
 
-  const verifyHash = () => {
-    if (!input || !compareHash) return;
-    try {
-      const match = bcrypt.compareSync(input, compareHash);
-      setIsMatch(match);
-    } catch (e) {
-      setIsMatch(false);
-    }
-  };
+  const vKey = `${vPw}|${vHash}`;
+  useEffect(() => {
+    if (!vPw || !anatomy(vHash.trim())) return;
+    let alive = true;
+    const t0 = performance.now();
+    bcrypt.compare(vPw, vHash.trim()).then((ok) => alive && setVerify({ key: vKey, ok, ms: performance.now() - t0 }));
+    return () => { alive = false; };
+  }, [vPw, vHash, vKey]);
 
-  const copyToClipboard = () => {
-    if (!hash) return;
-    navigator.clipboard.writeText(hash);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const a = result ? anatomy(result.hash) : null;
+  const byteLen = new TextEncoder().encode(pw).length;
+  const vA = anatomy(vHash.trim());
+  const v = verify.key === vKey ? verify.ok : null;
 
   return (
     <ToolLayout toolId="bcrypt">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Column: Input and Hash Generation */}
-        <div className="lg:col-span-6 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center gap-3">
-              <Lock className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Generator</span>
-            </div>
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-4">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Plaintext / Password</Label>
-                <Input 
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Enter text to hash..."
-                  className="h-14 px-6 rounded-2xl bg-muted/30 border-border/40 font-mono text-lg focus:ring-primary/20"
-                />
+      <SplitLayout>
+        <ToolPanel
+          title="Hash a password"
+          bodyClassName="p-3.5 space-y-4"
+          footer={
+            <Button size="lg" onClick={hash} disabled={!pw || busy} className="w-full">
+              {busy ? <RefreshCw className="animate-spin" /> : <Hash />} {busy ? `Hashing (cost ${cost})…` : "Generate hash"}
+            </Button>
+          }
+        >
+          <Field label="Password" htmlFor="bpw"><Input id="bpw" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="off" className="font-mono" /></Field>
+          {byteLen > 72 && <p className="text-xs text-amber-600 dark:text-amber-400">bcrypt only uses the first 72 bytes — the rest ({byteLen - 72} bytes) is ignored.</p>}
+          <SliderField label="Cost factor" value={cost} onChange={setCost} min={4} max={16} format={(v) => `${v} (2^${v} = ${(2 ** v).toLocaleString()} rounds)`} />
+          <p className="text-[11px] text-muted-foreground">Each +1 doubles the time. Aim for ~250 ms per hash on your server; 12 is a common default today.</p>
+          {result && a && (
+            <div className="space-y-2">
+              <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
+                <code className="flex-1 font-mono text-[13px] break-all">
+                  <span className="text-muted-foreground">${a.version}$</span><span className="text-sky-600 dark:text-sky-400">{String(a.cost).padStart(2, "0")}</span><span className="text-muted-foreground">$</span><span className="text-amber-600 dark:text-amber-400">{a.salt}</span><span className="text-emerald-600 dark:text-emerald-400">{a.hash}</span>
+                </code>
+                <CopyButton text={result.hash} iconOnly />
               </div>
-
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Salting Rounds (Cost)</Label>
-                  <span className="text-xs font-mono font-bold text-primary">{rounds}</span>
-                </div>
-                <input 
-                  type="range" 
-                  min="4" 
-                  max="15" 
-                  value={rounds} 
-                  onChange={(e) => setRounds(parseInt(e.target.value))}
-                  className="w-full h-2 bg-muted/50 rounded-lg appearance-none cursor-pointer accent-primary"
-                />
-                <p className="text-[10px] text-muted-foreground italic">Higher rounds = more secure but slower.</p>
+              <div className="flex flex-wrap gap-1.5 text-[11px]">
+                <StatusBadge>version {a.version}</StatusBadge>
+                <StatusBadge tone="info">cost {a.cost}</StatusBadge>
+                <StatusBadge tone="warning">salt (random)</StatusBadge>
+                <StatusBadge tone="success">hash</StatusBadge>
+                <StatusBadge>{Math.round(result.ms)} ms in this browser</StatusBadge>
               </div>
-
-              <Button 
-                onClick={generateHash}
-                disabled={!input || loading}
-                className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-              >
-                {loading ? <RefreshCw className="w-5 h-5 mr-2 animate-spin" /> : <Zap className="w-5 h-5 mr-2" />}
-                {loading ? "Generating..." : "Generate Bcrypt Hash"}
-              </Button>
-
-              {hash && (
-                <div className="space-y-3 animate-in fade-in slide-in-from-top-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-primary">Result Hash</span>
-                    <Button variant="ghost" size="sm" onClick={copyToClipboard} className="h-8 rounded-xl font-bold">
-                      {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-                      {copied ? "Copied" : "Copy"}
-                    </Button>
-                  </div>
-                  <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 font-mono text-xs break-all leading-relaxed text-primary">
-                    {hash}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Info className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Why Bcrypt?</h3>
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Bcrypt is a slow hashing algorithm designed specifically for passwords. Its adaptive nature (salting rounds) makes it resistant to brute-force and rainbow table attacks.
+          )}
+        </ToolPanel>
+
+        <ToolPanel title="Verify" bodyClassName="p-3.5 space-y-4">
+          <Field label="Password" htmlFor="vpw"><Input id="vpw" value={vPw} onChange={(e) => setVPw(e.target.value)} autoComplete="off" className="font-mono" /></Field>
+          <Field label="bcrypt hash" htmlFor="vh"><Input id="vh" value={vHash} onChange={(e) => setVHash(e.target.value)} placeholder="$2b$12$…" className="font-mono" /></Field>
+          {vHash.trim() && !vA && <p className="text-xs text-destructive">Not a valid bcrypt hash (expected 60 characters starting with $2a$, $2b$ or $2y$).</p>}
+          {v !== null && (
+            <p className={v ? "flex items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400" : "flex items-center gap-1.5 text-sm font-medium text-destructive"}>
+              {v ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />} {v ? "Password matches" : "Password does not match"}
             </p>
-          </div>
-        </div>
-
-        {/* Right Column: Verification */}
-        <div className="lg:col-span-6 space-y-6">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center gap-3">
-              <ShieldCheck className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Verifier</span>
-            </div>
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-4">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Hash to Compare</Label>
-                <Textarea 
-                  value={compareHash}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
-                    setCompareHash(e.target.value);
-                    setIsMatch(null);
-                  }}
-                  placeholder="Paste the bcrypt hash here..."
-                  className="h-[100px] p-4 rounded-xl bg-muted/30 border-border/40 font-mono text-sm focus-visible:ring-0 resize-none"
-                />
-              </div>
-
-              <Button 
-                onClick={verifyHash}
-                disabled={!input || !compareHash}
-                variant="outline"
-                className="w-full h-14 rounded-2xl text-lg font-bold border-border/40 hover:bg-primary/5 hover:text-primary transition-all active:scale-[0.98]"
-              >
-                <Unlock className="w-5 h-5 mr-2" />
-                Check for Match
-              </Button>
-
-              {isMatch !== null && (
-                <div className={cn(
-                  "p-8 rounded-3xl border-2 flex flex-col items-center justify-center text-center space-y-4 animate-in zoom-in-95 duration-300",
-                  isMatch ? "bg-green-500/10 border-green-500/30 text-green-600" : "bg-destructive/10 border-destructive/30 text-destructive"
-                )}>
-                  {isMatch ? (
-                    <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
-                      <ShieldCheck className="w-8 h-8" />
-                    </div>
-                  ) : (
-                    <div className="w-16 h-16 rounded-full bg-destructive/20 flex items-center justify-center">
-                      <ShieldAlert className="w-8 h-8" />
-                    </div>
-                  )}
-                  <div>
-                    <h3 className="text-xl font-bold">{isMatch ? "Passwords Match!" : "No Match Found"}</h3>
-                    <p className="text-xs opacity-80 mt-1">
-                      {isMatch ? "The plaintext matches the provided hash." : "The plaintext does NOT match the provided hash."}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+          )}
+          {vA && <p className="text-[11px] text-muted-foreground">Cost {vA.cost} · version ${vA.version}$</p>}
+        </ToolPanel>
+      </SplitLayout>
     </ToolLayout>
   );
 }

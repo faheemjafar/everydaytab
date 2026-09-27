@@ -1,207 +1,76 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { ToolLayout } from "@/components/tool-layout";
+import { ClearButton, CodeArea, CopyButton, StatusBadge, ToolAlert, ToolPanel } from "@/components/tool";
+import { useMounted } from "@/lib/local-store";
+import { decodePem, type Decoded } from "@/lib/x509";
 
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  ShieldCheck, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  Info,
-  Lock,
-  Search,
-  Calendar,
-  User,
-  Shield,
-  Fingerprint,
-  Globe,
-  AlertCircle
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import forge from "node-forge";
-
-interface CertInfo {
-  subject: any;
-  issuer: any;
-  validFrom: string;
-  validTo: string;
-  serialNumber: string;
-  fingerprint: string;
+function Cert({ d, index, total, now }: { d: Decoded; index: number; total: number; now: number }) {
+  const days = d.notAfter && now ? Math.floor((d.notAfter.getTime() - now) / 86400000) : null;
+  const notYet = d.notBefore && now ? d.notBefore.getTime() > now : false;
+  const status = d.kind === "csr" ? null : notYet ? { tone: "warning" as const, t: "Not yet valid" } : days === null ? null : days < 0 ? { tone: "error" as const, t: `Expired ${-days} days ago` } : days < 30 ? { tone: "warning" as const, t: `Expires in ${days} days` } : { tone: "success" as const, t: `Valid · ${days} days left` };
+  const role = d.kind === "csr" ? "Certificate signing request" : d.selfSigned ? (d.ca ? "Root CA (self-signed)" : "Self-signed") : d.ca ? "Intermediate CA" : "Leaf certificate";
+  const rows: [string, string][] = [
+    ["Subject", d.subject.text],
+    ...(d.issuer ? ([["Issuer", d.issuer.text]] as [string, string][]) : []),
+    ...(d.notBefore ? ([["Valid from", d.notBefore.toUTCString()], ["Valid until", d.notAfter!.toUTCString()]] as [string, string][]) : []),
+    ["Public key", `${d.key.type}${d.key.size ? ` ${d.key.size}-bit` : ""}${d.key.detail ? ` (${d.key.detail})` : ""}`],
+    ["Signature", d.sigAlg],
+    ...(d.serial ? ([["Serial", d.serial]] as [string, string][]) : []),
+    ...(d.keyUsage.length ? ([["Key usage", d.keyUsage.join(", ")]] as [string, string][]) : []),
+    ...(d.extKeyUsage.length ? ([["Extended usage", d.extKeyUsage.join(", ")]] as [string, string][]) : []),
+    ...(d.ca !== undefined ? ([["Basic constraints", `CA: ${d.ca ? "yes" : "no"}${d.pathLen !== undefined ? `, path length ${d.pathLen}` : ""}`]] as [string, string][]) : []),
+    ["SHA-256 fingerprint", d.sha256],
+    ["SHA-1 fingerprint", d.sha1],
+  ];
+  const cn = d.subject.fields.find(([k]) => k === "CN")?.[1];
+  return (
+    <ToolPanel
+      title={`${total > 1 ? `${index + 1}. ` : ""}${cn ?? d.subject.text}`}
+      actions={<><StatusBadge>{role}</StatusBadge>{status && <StatusBadge tone={status.tone}>{status.t}</StatusBadge>}{d.key.type === "RSA" && d.key.size < 2048 && <StatusBadge tone="error">Weak key</StatusBadge>}{/sha1With/i.test(d.sigAlg) && <StatusBadge tone="error">SHA-1 signature</StatusBadge>}</>}
+    >
+      <dl className="divide-y divide-border">
+        {rows.map(([k, v]) => (
+          <div key={k} className="group flex items-start gap-3 px-3.5 py-2">
+            <dt className="w-36 shrink-0 text-xs text-muted-foreground pt-0.5">{k}</dt>
+            <dd className="flex-1 min-w-0 font-mono text-[12.5px] break-all">{v}</dd>
+            <CopyButton text={v} iconOnly className="opacity-0 group-hover:opacity-100 focus:opacity-100" />
+          </div>
+        ))}
+        {d.san.length > 0 && (
+          <div className="flex items-start gap-3 px-3.5 py-2">
+            <dt className="w-36 shrink-0 text-xs text-muted-foreground pt-0.5">Subject alt names ({d.san.length})</dt>
+            <dd className="flex-1 flex flex-wrap gap-1">{d.san.map((s) => <StatusBadge key={s}>{s}</StatusBadge>)}</dd>
+          </div>
+        )}
+      </dl>
+    </ToolPanel>
+  );
 }
 
 export default function SSLDecoder() {
+  const mounted = useMounted();
+  const [now] = useState(() => Date.now());
   const [input, setInput] = useState("");
-  const [certInfo, setCertInfo] = useState<CertInfo | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
-
-  const decodeCert = (pem: string) => {
-    setInput(pem);
-    setError(null);
-    if (!pem.trim()) {
-      setCertInfo(null);
-      return;
-    }
-
+  const result = useMemo((): null | { error: string } | { certs: Decoded[] } => {
+    if (!input.trim()) return null;
     try {
-      const cert = forge.pki.certificateFromPem(pem);
-      
-      const getAttrs = (attrs: any[]) => {
-        const obj: any = {};
-        attrs.forEach(a => {
-          obj[a.name || a.type] = a.value;
-        });
-        return obj;
-      };
-
-      // Calculate fingerprint
-      const der = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
-      const md = forge.md.sha256.create();
-      md.update(der);
-      const fingerprint = md.digest().toHex().match(/.{2}/g)?.join(':').toUpperCase() || "";
-
-      setCertInfo({
-        subject: getAttrs(cert.subject.attributes),
-        issuer: getAttrs(cert.issuer.attributes),
-        validFrom: cert.validity.notBefore.toLocaleString(),
-        validTo: cert.validity.notAfter.toLocaleString(),
-        serialNumber: cert.serialNumber,
-        fingerprint
-      });
-    } catch (e: any) {
-      setError("Invalid PEM format. Ensure it starts with -----BEGIN CERTIFICATE-----");
-      setCertInfo(null);
+      return { certs: decodePem(input) };
+    } catch (e) {
+      return { error: (e as Error).message.includes("PEM") ? (e as Error).message : `Couldn't parse: ${(e as Error).message}` };
     }
-  };
-
-  const copy = (val: string, id: string) => {
-    navigator.clipboard.writeText(val);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
-  };
-
-  const InfoGroup = ({ title, icon: Icon, data }: { title: string, icon: any, data: any }) => (
-    <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-3xl overflow-hidden transition-all hover:shadow-2xl hover:shadow-primary/10">
-      <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-3">
-        <Icon className="w-4 h-4 text-primary" />
-        <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{title}</span>
-      </div>
-      <CardContent className="p-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          {Object.entries(data).map(([key, value]) => (
-            <div key={key} className="space-y-1">
-              <p className="text-[10px] font-bold uppercase text-muted-foreground/60 tracking-wider">
-                {key}
-              </p>
-              <p className="text-sm font-bold truncate" title={String(value)}>{String(value)}</p>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
+  }, [input]);
 
   return (
     <ToolLayout toolId="ssl-decoder">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Editor Side */}
-        <div className="lg:col-span-5 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col min-h-[400px]">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <Shield className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Certificate PEM</span>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => decodeCert("")} className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive">
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </div>
-            <CardContent className="p-0 flex-1 relative">
-              <Textarea
-                placeholder="-----BEGIN CERTIFICATE-----\n..."
-                value={input}
-                onChange={(e) => decodeCert(e.target.value)}
-                className="w-full h-full min-h-[300px] p-8 bg-transparent border-none focus-visible:ring-0 resize-none font-mono text-[10px] leading-relaxed"
-              />
-            </CardContent>
-          </Card>
-
-          {error && (
-            <div className="p-6 rounded-[2rem] bg-destructive/5 border border-destructive/20 flex items-start gap-4 animate-in zoom-in-95">
-              <div className="w-12 h-12 rounded-2xl bg-destructive/10 flex items-center justify-center text-destructive shrink-0">
-                <AlertCircle className="w-6 h-6" />
-              </div>
-              <p className="text-xs font-mono text-destructive/80 leading-relaxed">
-                {error}
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Results Panel */}
-        <div className="lg:col-span-7 space-y-6">
-          {certInfo ? (
-            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Card className="p-6 rounded-3xl border border-border/40 bg-card shadow-sm flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
-                    <Calendar className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-bold uppercase text-muted-foreground">Expires On</p>
-                    <p className="text-sm font-bold">{certInfo.validTo}</p>
-                  </div>
-                </Card>
-                <Card className="p-6 rounded-3xl border border-border/40 bg-card shadow-sm flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
-                    <Fingerprint className="w-6 h-6" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-bold uppercase text-muted-foreground">SHA-256 Fingerprint</p>
-                    <p className="text-[10px] font-mono font-bold truncate">{certInfo.fingerprint}</p>
-                  </div>
-                </Card>
-              </div>
-
-              <InfoGroup title="Subject (Owner)" icon={User} data={certInfo.subject} />
-              <InfoGroup title="Issuer (CA)" icon={ShieldCheck} data={certInfo.issuer} />
-
-              <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-                <div className="px-8 py-4 border-b border-border/40 bg-muted/30">
-                  <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Additional Details</span>
-                </div>
-                <CardContent className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest">Serial Number</p>
-                    <p className="text-sm font-mono font-bold break-all">{certInfo.serialNumber}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest">Valid From</p>
-                    <p className="text-sm font-bold">{certInfo.validFrom}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center p-12 text-center space-y-6 bg-muted/20 rounded-[2.5rem] border border-dashed border-border/40 min-h-[500px]">
-              <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center">
-                <Search className="w-10 h-10 text-muted-foreground/30" />
-              </div>
-              <div className="space-y-2">
-                <h3 className="font-bold text-lg">Waiting for Certificate</h3>
-                <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-                  Paste an X.509 certificate in PEM format to see its details.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
+      <div className="space-y-3">
+        <ToolPanel title="PEM certificate(s) or CSR" actions={<ClearButton onClick={() => setInput("")} iconOnly disabled={!input} />} footer={<span className="text-[11px] text-muted-foreground">Paste a full chain to decode every certificate. Get one with <code className="font-mono">openssl s_client -connect host:443 -showcerts</code>. Private keys are never needed.</span>}>
+          <CodeArea value={input} onChange={(e) => setInput(e.target.value)} minHeight={180} placeholder={"-----BEGIN CERTIFICATE-----\nMIIF…\n-----END CERTIFICATE-----"} />
+        </ToolPanel>
+        {result && "error" in result && <ToolAlert tone="error">{result.error}</ToolAlert>}
+        {result && "certs" in result && result.certs.map((d, i) => <Cert key={d.sha256} d={d} index={i} total={result.certs.length} now={mounted ? now : 0} />)}
+        {/PRIVATE KEY/.test(input) && <ToolAlert tone="warning">This text contains a private key. It isn&apos;t sent anywhere, but avoid pasting private keys into websites in general.</ToolAlert>}
       </div>
     </ToolLayout>
   );

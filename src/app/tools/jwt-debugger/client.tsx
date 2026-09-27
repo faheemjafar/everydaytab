@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { decodeJwt, decodeProtectedHeader, importJWK, importSPKI, importX509, jwtVerify, type JWTPayload } from "jose";
+import { SignJWT, decodeJwt, decodeProtectedHeader, importJWK, importPKCS8, importSPKI, importX509, jwtVerify, type JWTPayload } from "jose";
 import { Check, ShieldAlert, X } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
 import { Input } from "@/components/ui/input";
-import { ClearButton, CodeArea, CopyButton, Field, SplitLayout, StatusBadge, ToolAlert, ToolPanel } from "@/components/tool";
+import { ClearButton, CodeArea, CopyButton, Field, Segmented, SplitLayout, StatusBadge, ToolAlert, ToolPanel } from "@/components/tool";
 import { useMounted } from "@/lib/local-store";
 import { cn } from "@/lib/utils";
 
@@ -43,9 +43,9 @@ async function verifyToken(token: string, alg: string, key: string): Promise<Ver
   }
 }
 
-export default function JWTDebugger() {
+function Decoder({ initialToken = "" }: { initialToken?: string }) {
   const mounted = useMounted();
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(initialToken);
   const [key, setKey] = useState("");
   const [verify, setVerify] = useState<{ for: string; v: Verify }>({ for: "", v: { state: "idle" } });
 
@@ -82,7 +82,7 @@ export default function JWTDebugger() {
   const notYet = mounted && typeof p?.nbf === "number" && p.nbf * 1000 > now;
 
   return (
-    <ToolLayout toolId="jwt-debugger">
+    <>
       <div className="space-y-3">
         <SplitLayout>
           <div className="space-y-3">
@@ -165,6 +165,96 @@ export default function JWTDebugger() {
             {!decoded && <ToolPanel bodyClassName="px-4 py-10 text-center text-xs text-muted-foreground">Decoded header, payload and claims appear here.</ToolPanel>}
           </div>
         </SplitLayout>
+      </div>
+    </>
+  );
+}
+
+const SIGN_ALGS = ["HS256", "HS384", "HS512", "RS256", "RS384", "RS512", "PS256", "ES256", "ES384", "EdDSA"] as const;
+type SignAlg = (typeof SIGN_ALGS)[number];
+
+function Encoder({ onDecode }: { onDecode: (token: string) => void }) {
+  const [alg, setAlg] = useState<SignAlg>("HS256");
+  const [payload, setPayload] = useState('{\n  "sub": "1234567890",\n  "name": "Ada Lovelace",\n  "role": "admin"\n}');
+  const [key, setKey] = useState("");
+  const [exp, setExp] = useState("1h");
+  const [iat, setIat] = useState(true);
+  const [out, setOut] = useState<{ sig: string; token: string; error: string | null }>({ sig: "", token: "", error: null });
+
+  const sig = `${alg}|${payload}|${key}|${exp}|${iat}`;
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      let claims: Record<string, unknown>;
+      try {
+        claims = JSON.parse(payload);
+      } catch (e) {
+        return { error: `Payload is not valid JSON: ${(e as Error).message}` };
+      }
+      if (!key.trim()) return { error: alg.startsWith("HS") ? "Enter a secret to sign." : "Paste a private key (PKCS#8 PEM or JWK) to sign." };
+      const k = alg.startsWith("HS") ? new TextEncoder().encode(key) : key.trim().startsWith("{") ? await importJWK(JSON.parse(key), alg) : await importPKCS8(key, alg);
+      let j = new SignJWT(claims as JWTPayload).setProtectedHeader({ alg, typ: "JWT" });
+      if (iat) j = j.setIssuedAt();
+      if (exp) j = j.setExpirationTime(exp);
+      return { token: await j.sign(k) };
+    })()
+      .then((r) => alive && setOut({ sig, token: r.token ?? "", error: r.error ?? null }))
+      .catch((e) => alive && setOut({ sig, token: "", error: (e as Error).message }));
+    return () => { alive = false; };
+  }, [alg, payload, key, exp, iat, sig]);
+
+  const res = out.sig === sig ? out : { token: "", error: null };
+  const weak = alg.startsWith("HS") && key && new TextEncoder().encode(key).length < Number(alg.slice(2)) / 8;
+
+  return (
+    <SplitLayout>
+      <div className="space-y-3">
+        <ToolPanel title="Header" bodyClassName="p-3 space-y-3">
+          <Field label="Algorithm"><Segmented size="sm" value={alg} onChange={setAlg} options={SIGN_ALGS.map((a) => ({ value: a, label: a }))} className="flex-wrap" /></Field>
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Expires in" hint="e.g. 15m, 1h, 7d — blank for none" htmlFor="jexp"><Input id="jexp" value={exp} onChange={(e) => setExp(e.target.value)} className="w-28 font-mono" /></Field>
+            <label className="inline-flex items-center gap-2 h-(--control-h) text-[13px]"><input type="checkbox" checked={iat} onChange={(e) => setIat(e.target.checked)} className="size-3.5 accent-primary" />Add iat</label>
+          </div>
+        </ToolPanel>
+        <ToolPanel title="Payload (JSON)"><CodeArea value={payload} onChange={(e) => setPayload(e.target.value)} minHeight={180} /></ToolPanel>
+        <ToolPanel title={alg.startsWith("HS") ? "Secret" : "Private key"} bodyClassName="p-3 space-y-1.5">
+          {alg.startsWith("HS") ? (
+            <Input value={key} onChange={(e) => setKey(e.target.value)} placeholder="your-256-bit-secret" className="font-mono" autoComplete="off" />
+          ) : (
+            <CodeArea value={key} onChange={(e) => setKey(e.target.value)} minHeight={110} placeholder={"-----BEGIN PRIVATE KEY-----\n… (PKCS#8) or a private JWK"} />
+          )}
+          {weak && <p className="text-xs text-amber-600 dark:text-amber-400">Secret is shorter than {Number(alg.slice(2)) / 8} bytes — too short for {alg} (RFC 7518 §3.2).</p>}
+          {!alg.startsWith("HS") && <p className="text-[11px] text-muted-foreground">Need a key? Generate one with the RSA Key Generator (PKCS#8 output).</p>}
+        </ToolPanel>
+      </div>
+      <div className="space-y-3">
+        <ToolPanel title="Signed token" actions={<><CopyButton text={res.token} iconOnly /></>}>
+          {res.token ? (
+            <p className="px-3.5 py-3 font-mono text-[13px] break-all leading-relaxed">
+              {res.token.split(".").map((p, i) => (
+                <span key={i} className={["text-rose-600 dark:text-rose-400", "text-violet-600 dark:text-violet-400", "text-sky-600 dark:text-sky-400"][i]}>{i ? "." : ""}{p}</span>
+              ))}
+            </p>
+          ) : (
+            <p className="px-3.5 py-8 text-center text-xs text-muted-foreground">The signed JWT appears here.</p>
+          )}
+        </ToolPanel>
+        {res.error && <ToolAlert tone="error">{res.error}</ToolAlert>}
+        {res.token && <button type="button" onClick={() => onDecode(res.token)} className="text-xs text-primary hover:underline">Open in decoder →</button>}
+        <p className="text-[11px] text-muted-foreground">Signed locally with WebCrypto via jose. For testing and development — issue production tokens from your server.</p>
+      </div>
+    </SplitLayout>
+  );
+}
+
+export default function JWTDebugger() {
+  const [tab, setTab] = useState<"decode" | "encode">("decode");
+  const [seed, setSeed] = useState<{ token: string; n: number }>({ token: "", n: 0 });
+  return (
+    <ToolLayout toolId="jwt-debugger">
+      <div className="space-y-3">
+        <Segmented value={tab} onChange={setTab} options={[{ value: "decode", label: "Decode & verify" }, { value: "encode", label: "Encode & sign" }]} />
+        {tab === "decode" ? <Decoder key={seed.n} initialToken={seed.token} /> : <Encoder onDecode={(t) => { setSeed((s) => ({ token: t, n: s.n + 1 })); setTab("decode"); }} />}
       </div>
     </ToolLayout>
   );

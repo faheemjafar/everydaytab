@@ -13,7 +13,7 @@
 
 ## What's inside
 
-**212 tools** across **14 categories**, ordered by demand:
+**205 tools** across **14 categories**, ordered by demand:
 
 | Category | Tools | Examples |
 |---|---:|---|
@@ -23,12 +23,12 @@
 | **Audio** | 19 | Converter, trimmer, merger, compressor, equalizer, loudness normalizer, silence remover, ringtone maker |
 | **Converters** | 15 | Unix timestamp, time zones, units, temperature, number bases, Roman numerals, Morse, IBAN validator |
 | **Text** | 18 | Word counter, case converter, diff, sorter, cleaner, slugify, readability, Markdown ↔ HTML |
-| **Developer** | 35 | JSON (format/tree, diff, schema, → TS/Go/SQL/CSV), YAML/TOML/XML, JWT verify, regex, cron, cURL → code, Docker Compose, SQL, subnet |
+| **Developer** | 35 | JSON (format/tree, diff, schema, → TS/Go/SQL/CSV), YAML/TOML/XML, JWT decode/sign/verify, regex, cron, cURL → code, Docker Compose, SQL, subnet |
 | **Generators** | 13 | QR codes, barcodes, WiFi QR, UUID, ULID, tokens, passwords, Lorem Ipsum, invoices, ASCII art |
 | **Color** | 9 | HEX/RGB/HSL/OKLCH/LAB converter, palette extractor, contrast checker, color-blindness simulator, name finder |
 | **Math** | 16 | Calculator, expression evaluator, percentage, fractions, BMI, calories, salary, tips, dates, age, ETA |
-| **Security** | 15 | Hashes, HMAC, bcrypt, AES, RSA keys, JWT generator, OTP/TOTP, BIP39, password strength, SSL decoder |
-| **SEO** | 9 | Meta tags, Open Graph, robots.txt, sitemap, FAQ schema, keyword analyzer, URL slugs |
+| **Security** | 11 | Hash & file checksums, HMAC (webhook verify), bcrypt, AES-256-GCM, RSA keys (PEM/SSH/JWK), TOTP/HOTP, password strength, X.509 decoder, safe-link decoder |
+| **SEO** | 6 | Meta tags + SERP preview, Open Graph generator & audit, robots.txt, sitemap, FAQ schema, keyword density |
 | **Markdown** | 5 | Live editor, table generator, cheatsheet, → HTML, file combiner |
 | **Files** | 3 | ZIP, archive extractor, batch renamer |
 

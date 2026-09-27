@@ -1,217 +1,137 @@
 "use client";
 
-import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { 
-  ShieldCheck, 
-  Copy, 
-  Check, 
-  Trash2,
-  Key,
-  Zap,
-  Lock,
-  RefreshCw,
-  Fingerprint,
-  Info,
-  Clock,
-  QrCode,
-  Eye,
-  EyeOff,
-  User,
-  Building
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useEffect, useMemo, useState } from "react";
 import * as OTPAuth from "otpauth";
+import { QRCodeSVG } from "qrcode.react";
+import { Check, Dices, X } from "lucide-react";
+import { ToolLayout } from "@/components/tool-layout";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { CopyButton, Field, OptionsLayout, Segmented, StatusBadge, ToolAlert, ToolPanel } from "@/components/tool";
+import { useMounted } from "@/lib/local-store";
+
+type Algo = "SHA1" | "SHA256" | "SHA512";
+type Kind = "totp" | "hotp";
+
+const newSecret = () => new OTPAuth.Secret({ size: 20 }).base32;
 
 export default function OTPGenerator() {
+  const mounted = useMounted();
   const [secret, setSecret] = useState("JBSWY3DPEHPK3PXP");
-  const [showSecret, setShowSecret] = useState(false);
   const [issuer, setIssuer] = useState("EverydayTab");
   const [label, setLabel] = useState("user@example.com");
-  const [token, setToken] = useState("");
-  const [timeLeft, setTimeLeft] = useState(30);
-  const [copied, setCopied] = useState(false);
+  const [kind, setKind] = useState<Kind>("totp");
+  const [algo, setAlgo] = useState<Algo>("SHA1");
+  const [digits, setDigits] = useState<"6" | "8">("6");
+  const [period, setPeriod] = useState<"30" | "60">("30");
+  const [counter, setCounter] = useState(0);
+  const [uri, setUri] = useState("");
+  const [check, setCheck] = useState("");
+  const [now, setNow] = useState(0);
 
-  const generateToken = () => {
+  // Tick once a second for the countdown (client only).
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const otp = useMemo(() => {
     try {
-      const totp = new OTPAuth.TOTP({
-        issuer: issuer,
-        label: label,
-        algorithm: "SHA1",
-        digits: 6,
-        period: 30,
-        secret: OTPAuth.Secret.fromBase32(secret.replace(/\s/g, ""))
-      });
-      setToken(totp.generate());
-    } catch (e) {
-      setToken("Invalid Secret");
+      const s = OTPAuth.Secret.fromBase32(secret.replace(/[\s-]/g, "").toUpperCase());
+      const common = { issuer, label, algorithm: algo, digits: Number(digits), secret: s };
+      return { ok: true as const, o: kind === "totp" ? new OTPAuth.TOTP({ ...common, period: Number(period) }) : new OTPAuth.HOTP({ ...common, counter }) };
+    } catch {
+      return { ok: false as const };
+    }
+  }, [secret, issuer, label, algo, digits, period, kind, counter]);
+
+  const p = Number(period);
+  const left = p - (Math.floor(now / 1000) % p);
+  const code = mounted && otp.ok ? (otp.o instanceof OTPAuth.TOTP ? otp.o.generate({ timestamp: now }) : otp.o.generate({ counter })) : "";
+  const next = mounted && otp.ok && otp.o instanceof OTPAuth.TOTP ? otp.o.generate({ timestamp: now + p * 1000 }) : "";
+  const verified = check.length >= 6 && otp.ok ? (otp.o instanceof OTPAuth.TOTP ? otp.o.validate({ token: check, timestamp: now, window: 1 }) : otp.o.validate({ token: check, counter, window: 5 })) : undefined;
+  const uriStr = otp.ok ? otp.o.toString() : "";
+
+  const importUri = (s: string) => {
+    setUri(s);
+    try {
+      const o = OTPAuth.URI.parse(s.trim());
+      setSecret(o.secret.base32);
+      setIssuer(o.issuer);
+      setLabel(o.label);
+      setAlgo(o.algorithm as Algo);
+      setDigits(String(o.digits) as "6" | "8");
+      if (o instanceof OTPAuth.TOTP) { setKind("totp"); setPeriod(String(o.period) as "30" | "60"); } else { setKind("hotp"); setCounter(o.counter); }
+    } catch {
+      /* keep typing */
     }
   };
 
-  useEffect(() => {
-    generateToken();
-    const interval = setInterval(() => {
-      const seconds = 30 - (Math.floor(Date.now() / 1000) % 30);
-      setTimeLeft(seconds);
-      if (seconds === 30 || seconds === 0) {
-        generateToken();
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [secret, issuer, label]);
+  const fmt = (c: string) => (c.length === 8 ? `${c.slice(0, 4)} ${c.slice(4)}` : `${c.slice(0, 3)} ${c.slice(3)}`);
 
-  const copyToClipboard = () => {
-    if (!token || token === "Invalid Secret") return;
-    navigator.clipboard.writeText(token);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const options = (
+    <ToolPanel title="Account" bodyClassName="p-3 space-y-3">
+      <Field label="Secret (Base32)" htmlFor="sec">
+        <div className="flex gap-1">
+          <Input id="sec" value={secret} onChange={(e) => setSecret(e.target.value)} className="font-mono uppercase" spellCheck={false} autoComplete="off" />
+          <Button variant="outline" size="icon" onClick={() => setSecret(newSecret())} aria-label="Random secret" title="Generate a random 160-bit secret"><Dices /></Button>
+        </div>
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Issuer" htmlFor="iss"><Input id="iss" value={issuer} onChange={(e) => setIssuer(e.target.value)} /></Field>
+        <Field label="Account" htmlFor="lbl"><Input id="lbl" value={label} onChange={(e) => setLabel(e.target.value)} /></Field>
+      </div>
+      <Field label="Type"><Segmented size="sm" value={kind} onChange={setKind} options={[{ value: "totp", label: "TOTP (time)" }, { value: "hotp", label: "HOTP (counter)" }]} /></Field>
+      <Field label="Algorithm" hint={algo !== "SHA1" ? "Many authenticator apps only support SHA1." : undefined}><Segmented size="sm" value={algo} onChange={setAlgo} options={[{ value: "SHA1", label: "SHA1" }, { value: "SHA256", label: "SHA256" }, { value: "SHA512", label: "SHA512" }]} /></Field>
+      <div className="flex gap-4">
+        <Field label="Digits"><Segmented size="sm" value={digits} onChange={setDigits} options={[{ value: "6", label: "6" }, { value: "8", label: "8" }]} /></Field>
+        {kind === "totp" ? (
+          <Field label="Period"><Segmented size="sm" value={period} onChange={setPeriod} options={[{ value: "30", label: "30 s" }, { value: "60", label: "60 s" }]} /></Field>
+        ) : (
+          <Field label="Counter" htmlFor="ctr"><Input id="ctr" type="number" min={0} value={counter} onChange={(e) => setCounter(Math.max(0, Number(e.target.value) || 0))} className="w-24" /></Field>
+        )}
+      </div>
+      <Field label="Or import an otpauth:// URI" htmlFor="uri"><Input id="uri" value={uri} onChange={(e) => importUri(e.target.value)} placeholder="otpauth://totp/…" className="font-mono" /></Field>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="otp-generator">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Editor Side */}
-        <div className="lg:col-span-5 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-6">
-              <div className="space-y-6">
-                <div className="flex items-center gap-2 mb-2">
-                  <Key className="w-4 h-4 text-primary" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Account Config</span>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold">Secret Key (Base32)</Label>
-                  <div className="relative">
-                    <Input 
-                      type={showSecret ? "text" : "password"}
-                      value={secret}
-                      onChange={(e) => setSecret(e.target.value.toUpperCase())}
-                      placeholder="e.g. JBSW Y3DP EHPK 3PXP"
-                      className="h-12 px-6 pr-12 rounded-xl bg-muted/30 border-border/40 font-mono"
-                    />
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      onClick={() => setShowSecret(!showSecret)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg text-muted-foreground"
-                    >
-                      {showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-bold">Issuer</Label>
-                    <div className="relative">
-                      <Building className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input 
-                        value={issuer}
-                        onChange={(e) => setIssuer(e.target.value)}
-                        placeholder="Google, GitHub..."
-                        className="h-12 pl-10 rounded-xl bg-muted/30 border-border/40"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs font-bold">Label / Email</Label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input 
-                        value={label}
-                        onChange={(e) => setLabel(e.target.value)}
-                        placeholder="user@example.com"
-                        className="h-12 pl-10 rounded-xl bg-muted/30 border-border/40"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-6 border-t border-border/40 flex justify-end">
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={() => { setSecret(""); setToken(""); }}
-                  className="h-9 rounded-xl font-bold text-destructive hover:bg-destructive/10"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Clear Secret
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Compatibility</h3>
-            </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              This tool implements the <strong>RFC 6238</strong> (TOTP) algorithm, which is the same standard used by Google Authenticator, Microsoft Authenticator, and Authy.
-            </p>
-          </div>
-        </div>
-
-        {/* Results Panel */}
-        <div className="lg:col-span-7 h-full">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col h-full min-h-[400px]">
-            <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <ShieldCheck className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-primary">Authentication Code</span>
-              </div>
-              <div className="flex items-center gap-2 px-3 py-1 bg-primary/10 rounded-full">
-                <RefreshCw className={cn("w-3 h-3 text-primary", timeLeft <= 5 && "animate-spin")} />
-                <span className="text-[10px] font-bold text-primary">{timeLeft}s remaining</span>
-              </div>
-            </div>
-            <CardContent className="p-0 flex-1 relative bg-primary/[0.01] flex flex-col items-center justify-center space-y-8">
-              <div className="space-y-2 text-center">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Current Token</p>
-                <div 
-                  onClick={copyToClipboard}
-                  className={cn(
-                    "text-7xl md:text-8xl font-black tracking-tighter cursor-pointer transition-all hover:scale-105 active:scale-95",
-                    token === "Invalid Secret" ? "text-destructive text-3xl" : "text-foreground"
-                  )}
-                >
-                  {token}
-                </div>
-              </div>
-
-              <div className="w-full max-w-[200px] h-2 bg-muted/50 rounded-full overflow-hidden">
-                <div 
-                  className={cn(
-                    "h-full transition-all duration-1000 linear",
-                    timeLeft > 10 ? "bg-primary" : timeLeft > 5 ? "bg-orange-500" : "bg-destructive"
-                  )}
-                  style={{ width: `${(timeLeft / 30) * 100}%` }}
-                />
-              </div>
-
-              <Button
-                onClick={copyToClipboard}
-                disabled={!token || token === "Invalid Secret"}
-                className={cn(
-                  "rounded-2xl h-14 px-10 font-bold text-lg shadow-lg shadow-primary/20 transition-all",
-                  copied ? "bg-green-500 hover:bg-green-600" : "bg-primary hover:bg-primary/90"
+      <OptionsLayout options={options}>
+        {!otp.ok ? (
+          <ToolAlert tone="error">Invalid Base32 secret — use letters A–Z and digits 2–7.</ToolAlert>
+        ) : (
+          <>
+            <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+              <ToolPanel title="Current code" actions={<CopyButton text={code} iconOnly />} bodyClassName="p-5 space-y-3">
+                <p className="font-mono text-5xl font-semibold tracking-wider tabular-nums">{code ? fmt(code) : "••• •••"}</p>
+                {kind === "totp" ? (
+                  <>
+                    <div className="h-1.5 rounded-full bg-muted overflow-hidden"><div className={left <= 5 ? "h-full bg-red-500 transition-[width] duration-1000 ease-linear" : "h-full bg-primary transition-[width] duration-1000 ease-linear"} style={{ width: `${(left / p) * 100}%` }} /></div>
+                    <p className="text-xs text-muted-foreground tabular-nums">Refreshes in {mounted ? left : p}s · next {next ? fmt(next) : ""}</p>
+                  </>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={() => setCounter((c) => c + 1)}>Next counter ({counter + 1})</Button>
                 )}
-              >
-                {copied ? <Check className="w-5 h-5 mr-2" /> : <Copy className="w-5 h-5 mr-2" />}
-                {copied ? "Token Copied!" : "Copy Token"}
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+              </ToolPanel>
+              <ToolPanel title="Scan with an authenticator" bodyClassName="p-3 flex justify-center bg-white">
+                <QRCodeSVG value={uriStr} size={168} marginSize={1} />
+              </ToolPanel>
+            </div>
+            <ToolPanel title="otpauth:// URI" actions={<CopyButton text={uriStr} iconOnly />}>
+              <p className="px-3.5 py-2.5 font-mono text-[12px] break-all">{uriStr}</p>
+            </ToolPanel>
+            <ToolPanel title="Verify a code" bodyClassName="p-3 flex items-center gap-3">
+              <Input value={check} onChange={(e) => setCheck(e.target.value.replace(/\D/g, "").slice(0, 8))} placeholder="123456" inputMode="numeric" className="w-36 font-mono text-lg tracking-widest" />
+              {verified !== undefined && (verified !== null ? <StatusBadge tone="success"><Check className="w-3 h-3" /> Valid{verified !== 0 ? ` (${verified > 0 ? "+" : ""}${verified} step)` : ""}</StatusBadge> : <StatusBadge tone="error"><X className="w-3 h-3" /> Invalid</StatusBadge>)}
+              <span className="text-[11px] text-muted-foreground">Accepts ±1 time step to allow for clock drift.</span>
+            </ToolPanel>
+            <p className="text-[11px] text-muted-foreground">For testing your own 2FA implementation. Don&apos;t paste secrets for real accounts into any website — keep those in your authenticator app.</p>
+          </>
+        )}
+      </OptionsLayout>
     </ToolLayout>
   );
 }
