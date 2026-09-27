@@ -2,33 +2,20 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "EverydayTab - Professional Utility Tools",
+    name: "EverydayTab — Free Online Tools",
     short_name: "EverydayTab",
-    description: "A comprehensive collection of magical tools for your everyday tasks, designed to work offline.",
+    description: "250+ free online tools for PDF, image, audio, video, text and developers. Runs entirely in your browser.",
     start_url: "/",
     display: "standalone",
-    background_color: "#ffffff",
-    theme_color: "#0f172a",
-    orientation: "portrait",
+    background_color: "#1c1917",
+    theme_color: "#1c1917",
+    orientation: "any",
     icons: [
-      {
-        src: "/logo.svg",
-        sizes: "any",
-        type: "image/svg+xml",
-        purpose: "any",
-      },
-      {
-        src: "/logo.svg",
-        sizes: "192x192",
-        type: "image/svg+xml",
-        purpose: "maskable",
-      },
-      {
-        src: "/logo.svg",
-        sizes: "512x512",
-        type: "image/svg+xml",
-        purpose: "any",
-      },
+      { src: "/logo.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+      { src: "/apple-icon.png", sizes: "180x180", type: "image/png", purpose: "any" },
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
 }
