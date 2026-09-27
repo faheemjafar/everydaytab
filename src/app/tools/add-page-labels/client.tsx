@@ -1,13 +1,12 @@
 "use client";
 
+import { useState } from "react";
+import { Plus, Trash2, Type } from "lucide-react";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Type, FileUp, FileText, RefreshCw, AlertCircle, Plus, Trash2 } from "lucide-react";
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { Input } from "@/components/ui/input";
+import { Field, PdfTool, PositionPicker, ToolPanel, downloadFile, placeText, suffixName, usePdfFile, type HAlign, type VAlign } from "@/components/tool";
 
 type LabelStyle = "decimal" | "roman" | "roman-upper" | "letters" | "letters-upper";
 
@@ -89,270 +88,133 @@ function createRule(overrides: Partial<LabelRule> = {}): LabelRule {
   };
 }
 
-export default function AddPageLabels() {
-  const [file, setFile] = useState<File | null>(null);
-  const [pdfDoc, setPdfDoc] = useState<PDFDocument | null>(null);
-  const [pageCount, setPageCount] = useState(0);
-  const [rules, setRules] = useState<LabelRule[]>([createRule()]);
-  const [position, setPosition] = useState<"top-left" | "top-right" | "bottom-left" | "bottom-right">("bottom-right");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+const STYLES: { value: LabelStyle; label: string }[] = [
+  { value: "decimal", label: "1, 2, 3" },
+  { value: "roman", label: "i, ii, iii" },
+  { value: "roman-upper", label: "I, II, III" },
+  { value: "letters", label: "a, b, c" },
+  { value: "letters-upper", label: "A, B, C" },
+];
 
-  const handleFile = async (f: File) => {
-    if (f.type !== "application/pdf") return;
-    setFile(f);
-    setError(null);
-
-    try {
-      const buffer = await f.arrayBuffer();
-      const doc = await PDFDocument.load(buffer);
-      setPdfDoc(doc);
-      setPageCount(doc.getPageCount());
-    } catch (e: any) {
-      setError(e.message || "Failed to load PDF.");
+/** Label for each page (1-based) given the rules; first matching rule wins. */
+function computeLabels(rules: LabelRule[], pageCount: number): string[] {
+  const ranges = rules.map((r) => parsePageRange(r.pageRange, pageCount));
+  return Array.from({ length: pageCount }, (_, i) => {
+    const n = i + 1;
+    for (let k = 0; k < rules.length; k++) {
+      const idx = ranges[k].indexOf(n);
+      if (idx >= 0) return rules[k].prefix + formatLabel(rules[k].startValue + idx, rules[k].style);
     }
-  };
+    return "";
+  });
+}
 
-  const formatSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
+export default function AddPageLabels() {
+  const [rules, setRules] = useState<LabelRule[]>(() => [createRule({ pageRange: "1-4", style: "roman" }), createRule({ pageRange: "5-" })]);
+  const [position, setPosition] = useState<`${VAlign}-${HAlign}`>("bottom-right");
+  const [fontSize, setFontSize] = useState(10);
+  const pdf = usePdfFile();
+  const { pageCount } = pdf;
 
   const addRule = () => setRules((prev) => [...prev, createRule()]);
   const removeRule = (id: string) => setRules((prev) => prev.filter((r) => r.id !== id));
-  const updateRule = (id: string, updates: Partial<LabelRule>) => {
-    setRules((prev) => prev.map((r) => (r.id === id ? { ...r, ...updates } : r)));
-  };
+  const updateRule = (id: string, updates: Partial<LabelRule>) => setRules((prev) => prev.map((r) => (r.id === id ? { ...r, ...updates } : r)));
 
-  const applyLabels = async () => {
-    if (!pdfDoc || !file || pageCount === 0) return;
-    setLoading(true);
-    setError(null);
+  // "5-" means "5 to the end".
+  const normalized = rules.map((r) => ({ ...r, pageRange: r.pageRange.replace(/(\d+)-\s*(,|$)/g, `$1-${pageCount}$2`) }));
+  const labels = pageCount ? computeLabels(normalized, pageCount) : [];
 
-    try {
-      const newPdfDoc = await PDFDocument.create();
-      const font = await newPdfDoc.embedFont(StandardFonts.Helvetica);
-
-      for (let i = 0; i < pdfDoc.getPageCount(); i++) {
-        const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [i]);
-        const { width, height } = copiedPage.getSize();
-        const newPage = newPdfDoc.addPage([width, height]);
-        newPage.drawPage(await newPdfDoc.embedPage(copiedPage), { x: 0, y: 0, width, height });
-
-        const pageNum = i + 1;
-        let label = "";
-
-        for (const rule of rules) {
-          const range = parsePageRange(rule.pageRange, pageCount);
-          if (range.includes(pageNum)) {
-            const index = range.indexOf(pageNum);
-            label = rule.prefix + formatLabel(rule.startValue + index, rule.style);
-            break;
-          }
-        }
-
-        if (label) {
-          const fontSize = 10;
-          const textWidth = font.widthOfTextAtSize(label, fontSize);
-          const margin = 20;
-
-          let x = margin;
-          let y = margin;
-
-          switch (position) {
-            case "top-left": y = height - margin - fontSize; break;
-            case "top-right": x = width - textWidth - margin; y = height - margin - fontSize; break;
-            case "bottom-right": x = width - textWidth - margin; break;
-            default: break;
-          }
-
-          newPage.drawText(label, {
-            x,
-            y,
-            font,
-            size: fontSize,
-            color: rgb(0.5, 0.5, 0.5),
-          });
-        }
-      }
-
-      const bytes = await newPdfDoc.save();
-      const blob = new Blob([bytes.slice()], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `labeled-${file.name}`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      setRules([createRule()]);
-      setFile(null);
-      setPdfDoc(null);
-      setPageCount(0);
-    } catch (e: any) {
-      setError(e.message || "Failed to add page labels.");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const applyLabels = () =>
+    pdf.run(async () => {
+      if (!pdf.file || !pageCount) return;
+      const doc = await PDFDocument.load(await pdf.file.arrayBuffer());
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      const [v, h] = position.split("-") as [VAlign, HAlign];
+      doc.getPages().forEach((page, i) => {
+        const label = labels[i];
+        if (!label) return;
+        const { x, y } = placeText(page.getSize(), font.widthOfTextAtSize(label, fontSize), h, v, 24, fontSize);
+        page.drawText(label, { x, y, font, size: fontSize, color: rgb(0.45, 0.45, 0.45) });
+      });
+      downloadFile(await doc.save(), suffixName(pdf.file, "labeled"));
+    }, "Failed to add page labels.");
 
   return (
     <ToolLayout toolId="add-page-labels">
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-          <CardContent className="p-8">
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const f = e.dataTransfer.files[0];
-                if (f) handleFile(f);
-              }}
-              className="relative group h-48 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center transition-all cursor-pointer border-border/60 hover:border-primary/40 hover:bg-primary/5"
-            >
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-                className="hidden"
-                accept="application/pdf"
-              />
-              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-4 group-hover:scale-110 transition-transform">
-                <FileUp className="w-8 h-8" />
-              </div>
-              <div className="text-center">
-                <h3 className="font-bold text-lg">Upload PDF</h3>
-                <p className="text-sm text-muted-foreground mt-1">Click or drag PDF here</p>
-              </div>
+      <PdfTool
+        pdf={pdf}
+        options={
+          <div className="flex flex-col md:flex-row gap-5">
+            <Field label="Position">
+              <PositionPicker value={position} onChange={setPosition} />
+            </Field>
+            <div className="flex-1 space-y-3">
+              <p className="text-[11px] text-muted-foreground">
+                Rules apply top to bottom; the first rule that covers a page wins. Ranges like <code className="font-mono">1-4</code>, <code className="font-mono">5-</code> (to the end), <code className="font-mono">odd</code>, <code className="font-mono">even</code>. Leave blank for all pages.
+              </p>
+              <Field label="Font size" inline>
+                <Input type="number" min={6} max={24} value={fontSize} onChange={(e) => setFontSize(Math.min(24, Math.max(6, Number(e.target.value) || 10)))} className="w-20" />
+              </Field>
             </div>
+          </div>
+        }
+        action={{ label: "Add labels", busyLabel: "Labelling…", icon: <Type />, onClick: applyLabels, disabled: !labels.some(Boolean) }}
+      >
+        <ToolPanel
+          title="Rules"
+          footer={
+            <Button variant="outline" size="sm" onClick={addRule}>
+              <Plus /> Add rule
+            </Button>
+          }
+        >
+          <ul className="divide-y divide-border">
+            {rules.map((rule, i) => (
+              <li key={rule.id} className="grid grid-cols-[auto_1fr_1fr] sm:grid-cols-[auto_1fr_150px_1fr_90px_auto] items-end gap-2 px-3 py-2.5">
+                <span className="w-5 pb-2 text-[11px] text-muted-foreground tabular-nums text-right">{i + 1}</span>
+                <Field label="Pages">
+                  <Input value={rule.pageRange} onChange={(e) => updateRule(rule.id, { pageRange: e.target.value })} placeholder="all" className="font-mono" />
+                </Field>
+                <Field label="Style">
+                  <select
+                    value={rule.style}
+                    onChange={(e) => updateRule(rule.id, { style: e.target.value as LabelStyle })}
+                    className="h-(--control-h) w-full rounded-md border border-input bg-transparent px-2 text-xs dark:bg-input/30"
+                  >
+                    {STYLES.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Prefix">
+                  <Input value={rule.prefix} onChange={(e) => updateRule(rule.id, { prefix: e.target.value })} placeholder="e.g. A-" />
+                </Field>
+                <Field label="Start at">
+                  <Input type="number" min={1} value={rule.startValue} onChange={(e) => updateRule(rule.id, { startValue: Math.max(1, Number(e.target.value) || 1) })} />
+                </Field>
+                <Button variant="ghost" size="icon" onClick={() => removeRule(rule.id)} disabled={rules.length === 1} aria-label="Remove rule" className="text-muted-foreground hover:text-destructive">
+                  <Trash2 />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </ToolPanel>
 
-            {file && (
-              <div className="mt-6 flex items-center gap-3 p-4 rounded-2xl bg-card/60 border border-border/40">
-                <FileText className="w-5 h-5 text-primary shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">{formatSize(file.size)} • {pageCount} pages</p>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-          <CardContent className="p-8 space-y-6">
-            <div className="flex items-center gap-2">
-              <Type className="w-5 h-5 text-primary" />
-              <h3 className="font-bold">Label Rules</h3>
-            </div>
-
-            <div className="space-y-3">
-              <Label className="text-sm font-medium">Position</Label>
-              <select
-                value={position}
-                onChange={(e) => setPosition(e.target.value as any)}
-                className="w-full h-10 px-3 rounded-xl border border-border/40 bg-card/60 text-sm"
-              >
-                <option value="bottom-left">Bottom Left</option>
-                <option value="bottom-right">Bottom Right</option>
-                <option value="top-left">Top Left</option>
-                <option value="top-right">Top Right</option>
-              </select>
-            </div>
-
-            <div className="space-y-3 max-h-64 overflow-y-auto">
-              {rules.map((rule, index) => (
-                <div key={rule.id} className="p-4 rounded-2xl bg-card/60 border border-border/40 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Rule {index + 1}</span>
-                    {rules.length > 1 && (
-                      <button
-                        onClick={() => removeRule(rule.id)}
-                        className="text-destructive hover:text-destructive/80"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                  <input
-                    type="text"
-                    value={rule.pageRange}
-                    onChange={(e) => updateRule(rule.id, { pageRange: e.target.value })}
-                    placeholder="e.g. 1-4, 7, odd, or leave empty for all"
-                    className="w-full h-9 px-3 rounded-lg border border-border/40 bg-background text-sm"
-                  />
-                  <div className="grid grid-cols-3 gap-2">
-                    <select
-                      value={rule.style}
-                      onChange={(e) => updateRule(rule.id, { style: e.target.value as LabelStyle })}
-                      className="h-9 px-2 rounded-lg border border-border/40 bg-background text-sm"
-                    >
-                      <option value="decimal">1, 2, 3</option>
-                      <option value="roman">i, ii, iii</option>
-                      <option value="roman-upper">I, II, III</option>
-                      <option value="letters">a, b, c</option>
-                      <option value="letters-upper">A, B, C</option>
-                    </select>
-                    <input
-                      type="text"
-                      value={rule.prefix}
-                      onChange={(e) => updateRule(rule.id, { prefix: e.target.value })}
-                      placeholder="Prefix"
-                      className="h-9 px-2 rounded-lg border border-border/40 bg-background text-sm"
-                    />
-                    <input
-                      type="number"
-                      min={0}
-                      value={rule.startValue}
-                      onChange={(e) => updateRule(rule.id, { startValue: Math.max(0, Number(e.target.value)) })}
-                      placeholder="Start"
-                      className="h-9 px-2 rounded-lg border border-border/40 bg-background text-sm"
-                    />
-                  </div>
-                </div>
+        {labels.length > 0 && (
+          <ToolPanel title="Preview" bodyClassName="p-3">
+            <div className="flex flex-wrap gap-1 max-h-40 overflow-y-auto custom-scrollbar">
+              {labels.map((l, i) => (
+                <span key={i} className="inline-flex flex-col items-center justify-center w-12 h-11 rounded-sm border border-border bg-card text-[11px]">
+                  <span className="text-muted-foreground tabular-nums">p.{i + 1}</span>
+                  <span className="font-medium truncate max-w-11">{l || "—"}</span>
+                </span>
               ))}
             </div>
-
-            <Button variant="outline" onClick={addRule} className="w-full rounded-xl">
-              <Plus className="w-4 h-4 mr-2" />
-              Add Rule
-            </Button>
-
-            <Button
-              onClick={applyLabels}
-              disabled={!file || !pdfDoc || loading}
-              className="w-full h-14 rounded-2xl text-base font-bold"
-            >
-              {loading ? (
-                <>
-                  <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
-                  Applying...
-                </>
-              ) : (
-                <>
-                  <Type className="w-5 h-5 mr-2" />
-                  Apply Page Labels
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-
-      {error && (
-        <div className="p-6 rounded-3xl border-2 border-destructive/30 bg-destructive/5 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-destructive text-white flex items-center justify-center shrink-0">
-            <AlertCircle className="w-6 h-6" />
-          </div>
-          <div>
-            <h3 className="font-bold text-destructive">Error</h3>
-            <p className="text-sm text-destructive/80">{error}</p>
-          </div>
-        </div>
-      )}
+          </ToolPanel>
+        )}
+      </PdfTool>
     </ToolLayout>
   );
 }

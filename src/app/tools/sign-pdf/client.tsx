@@ -1,233 +1,221 @@
 "use client";
 
-import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useRef } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { PenTool, FileUp, FileText, RefreshCw, AlertCircle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Eraser, PenTool, Upload } from "lucide-react";
 import { PDFDocument } from "pdf-lib";
+import { ToolLayout } from "@/components/tool-layout";
+import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
+import { ChoiceGrid, Field, FieldGrid, PdfTool, Segmented, downloadFile, suffixName, usePdfFile } from "@/components/tool";
 
-export default function SignPDF() {
-  const [file, setFile] = useState<File | null>(null);
-  const [sigImage, setSigImage] = useState<File | null>(null);
-  const [position, setPosition] = useState<string>("bottom-right");
-  const [size, setSize] = useState<number>(15);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const sigInputRef = useRef<HTMLInputElement>(null);
+type Position = "bottom-right" | "bottom-left" | "center" | "top-right" | "top-left";
+type Pages = "all" | "first" | "last";
+type Source = "draw" | "upload";
 
-  const handleFile = async (f: File) => {
-    if (f.type !== "application/pdf") return;
-    setFile(f);
-    setError(null);
+const POSITIONS: { value: Position; label: string }[] = [
+  { value: "top-left", label: "Top left" },
+  { value: "center", label: "Centre" },
+  { value: "top-right", label: "Top right" },
+  { value: "bottom-left", label: "Bottom left" },
+  { value: "bottom-right", label: "Bottom right" },
+];
+
+/** Minimal pointer-based signature pad that exports a transparent PNG. */
+function SignaturePad({ onChange, ink }: { onChange: (png: Blob | null) => void; ink: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const drawing = useRef(false);
+  const dirty = useRef(false);
+
+  useEffect(() => {
+    const c = ref.current!;
+    const dpr = window.devicePixelRatio || 1;
+    c.width = c.clientWidth * dpr;
+    c.height = c.clientHeight * dpr;
+    const ctx = c.getContext("2d")!;
+    ctx.scale(dpr, dpr);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 2.4;
+  }, []);
+
+  useEffect(() => {
+    const ctx = ref.current?.getContext("2d");
+    if (ctx) ctx.strokeStyle = ink;
+  }, [ink]);
+
+  const pos = (e: React.PointerEvent) => {
+    const r = ref.current!.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top] as const;
   };
 
-  const handleSig = async (f: File) => {
-    if (!f.type.startsWith("image/")) return;
-    setSigImage(f);
+  const emit = () => {
+    if (!dirty.current) return onChange(null);
+    ref.current!.toBlob((b) => onChange(b), "image/png");
   };
 
-  const sign = async () => {
-    if (!file || !sigImage) return;
-    setLoading(true);
-    setError(null);
-
-    try {
-      const buffer = await file.arrayBuffer();
-      const doc = await PDFDocument.load(buffer);
-
-      const sigBytes = await sigImage.arrayBuffer();
-      let embeddedImage;
-      if (sigImage.type === "image/png") {
-        embeddedImage = await doc.embedPng(sigBytes);
-      } else {
-        embeddedImage = await doc.embedJpg(sigBytes);
-      }
-
-      const { width: imgW, height: imgH } = embeddedImage.size();
-      const scale = size / 100;
-
-      for (const page of doc.getPages()) {
-        const { width, height } = page.getSize();
-        const w = imgW * scale;
-        const h = imgH * scale;
-
-        let x = 0, y = 0;
-        const margin = 20;
-
-        switch (position) {
-          case "top-left":
-            x = margin;
-            y = height - h - margin;
-            break;
-          case "top-right":
-            x = width - w - margin;
-            y = height - h - margin;
-            break;
-          case "bottom-left":
-            x = margin;
-            y = margin;
-            break;
-          case "bottom-right":
-            x = width - w - margin;
-            y = margin;
-            break;
-          case "center":
-            x = (width - w) / 2;
-            y = (height - h) / 2;
-            break;
-        }
-
-        page.drawImage(embeddedImage, { x, y, width: w, height: h });
-      }
-
-      const bytes = await doc.save();
-      const blob = new Blob([bytes.slice()], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `signed-${file.name}`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e: any) {
-      setError(e.message || "Failed to sign PDF.");
-    } finally {
-      setLoading(false);
-    }
+  const clear = () => {
+    const c = ref.current!;
+    c.getContext("2d")!.clearRect(0, 0, c.width, c.height);
+    dirty.current = false;
+    onChange(null);
   };
 
   return (
+    <div className="space-y-1.5">
+      <div className="relative rounded-md border border-dashed border-border bg-white">
+        <canvas
+          ref={ref}
+          className="w-full h-36 touch-none cursor-crosshair rounded-md"
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            drawing.current = true;
+            const ctx = ref.current!.getContext("2d")!;
+            const [x, y] = pos(e);
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+          }}
+          onPointerMove={(e) => {
+            if (!drawing.current) return;
+            const ctx = ref.current!.getContext("2d")!;
+            const [x, y] = pos(e);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            dirty.current = true;
+          }}
+          onPointerUp={() => {
+            drawing.current = false;
+            emit();
+          }}
+        />
+        <span className="pointer-events-none absolute left-4 right-4 bottom-8 border-b border-stone-300" />
+        <span className="pointer-events-none absolute left-4 bottom-2 text-[10px] text-stone-400">Sign above the line</span>
+      </div>
+      <Button variant="ghost" size="sm" onClick={clear}>
+        <Eraser /> Clear
+      </Button>
+    </div>
+  );
+}
+
+export default function SignPDF() {
+  const [source, setSource] = useState<Source>("draw");
+  const [sig, setSigState] = useState<Blob | null>(null);
+  const [sigPreview, setSigPreview] = useState<string | null>(null);
+  // Keep a preview URL in sync with the signature blob (revoking the old one).
+  const setSig = (b: Blob | null) => {
+    setSigState(b);
+    setSigPreview((old) => {
+      if (old) URL.revokeObjectURL(old);
+      return b ? URL.createObjectURL(b) : null;
+    });
+  };
+  const [ink, setInk] = useState("#1e3a8a");
+  const [position, setPosition] = useState<Position>("bottom-right");
+  const [pages, setPages] = useState<Pages>("last");
+  const [size, setSize] = useState(25);
+  const pdf = usePdfFile();
+
+  const sign = () =>
+    pdf.run(async () => {
+      if (!pdf.file || !sig) return;
+      const doc = await PDFDocument.load(await pdf.file.arrayBuffer());
+      const bytes = await sig.arrayBuffer();
+      const image = sig.type === "image/png" ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+      const all = doc.getPages();
+      const targets = pages === "all" ? all : pages === "first" ? all.slice(0, 1) : all.slice(-1);
+      const margin = 36;
+      for (const page of targets) {
+        const { width, height } = page.getSize();
+        // Size is a % of page width; keep aspect ratio.
+        const w = (width * size) / 100;
+        const h = (image.height / image.width) * w;
+        const x = position.endsWith("left") ? margin : position.endsWith("right") ? width - w - margin : (width - w) / 2;
+        const y = position.startsWith("top") ? height - h - margin : position.startsWith("bottom") ? margin : (height - h) / 2;
+        page.drawImage(image, { x, y, width: w, height: h });
+      }
+      downloadFile(await doc.save(), suffixName(pdf.file, "signed"));
+    }, "Failed to sign PDF.");
+
+  return (
     <ToolLayout toolId="sign-pdf">
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-          <CardContent className="p-8 space-y-6">
-            <div>
-              <h3 className="font-bold mb-4">1. Upload PDF</h3>
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const f = e.dataTransfer.files[0];
-                  if (f) handleFile(f);
+      <PdfTool
+        pdf={pdf}
+        optionsTitle="Signature"
+        options={
+          <div className="grid gap-5 md:grid-cols-2">
+            <div className="space-y-3">
+              <Segmented
+                value={source}
+                onChange={(s) => {
+                  setSource(s);
+                  setSig(null);
                 }}
-                className="relative group h-32 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer border-border/60 hover:border-primary/40 hover:bg-primary/5"
-              >
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-                  className="hidden"
-                  accept="application/pdf"
-                />
-                <FileUp className="w-6 h-6 text-primary mb-2" />
-                <p className="text-sm font-medium">Click or drag PDF</p>
-              </div>
-              {file && (
-                <div className="mt-3 flex items-center gap-2 p-3 rounded-xl bg-card/60 border border-border/40">
-                  <FileText className="w-4 h-4 text-primary" />
-                  <p className="text-sm truncate">{file.name}</p>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <h3 className="font-bold mb-4">2. Upload Signature</h3>
-              <div
-                onClick={() => sigInputRef.current?.click()}
-                className="relative group h-32 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer border-border/60 hover:border-primary/40 hover:bg-primary/5"
-              >
-                <input
-                  type="file"
-                  ref={sigInputRef}
-                  onChange={(e) => e.target.files?.[0] && handleSig(e.target.files[0])}
-                  className="hidden"
-                  accept="image/png,image/jpeg,image/jpg"
-                />
-                <PenTool className="w-6 h-6 text-primary mb-2" />
-                <p className="text-sm font-medium">PNG or JPG signature</p>
-              </div>
-              {sigImage && (
-                <div className="mt-3 flex items-center gap-2 p-3 rounded-xl bg-card/60 border border-border/40">
-                  <PenTool className="w-4 h-4 text-primary" />
-                  <p className="text-sm truncate">{sigImage.name}</p>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-          <CardContent className="p-8 space-y-6">
-            <h3 className="font-bold">3. Position & Size</h3>
-
-            <div className="space-y-3">
-              <Label className="text-sm font-medium">Position</Label>
-              <div className="grid grid-cols-3 gap-2">
-                {["top-left", "top-right", "center", "bottom-left", "bottom-right"].map((pos) => (
-                  <button
-                    key={pos}
-                    onClick={() => setPosition(pos)}
-                    className={`p-2 rounded-xl text-xs font-medium transition-all ${
-                      position === pos
-                        ? "bg-primary text-white"
-                        : "bg-muted hover:bg-muted/80"
-                    }`}
-                  >
-                    {pos.replace("-", " ")}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <Label className="text-sm font-medium">Size ({size}%)</Label>
-              <input
-                type="range"
-                min={5}
-                max={50}
-                value={size}
-                onChange={(e) => setSize(Number(e.target.value))}
-                className="w-full accent-primary"
+                options={[
+                  { value: "draw", label: <><PenTool className="w-3.5 h-3.5" /> Draw</> },
+                  { value: "upload", label: <><Upload className="w-3.5 h-3.5" /> Upload image</> },
+                ]}
               />
-            </div>
-
-            <Button
-              onClick={sign}
-              disabled={!file || !sigImage || loading}
-              className="w-full h-14 rounded-2xl text-base font-bold"
-            >
-              {loading ? (
+              {source === "draw" ? (
                 <>
-                  <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
-                  Signing...
+                  <SignaturePad key="pad" onChange={setSig} ink={ink} />
+                  <Field label="Ink" inline>
+                    <div className="flex gap-1.5">
+                      {["#111827", "#1e3a8a", "#7f1d1d"].map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setInk(c)}
+                          aria-label={`Ink ${c}`}
+                          aria-pressed={ink === c}
+                          style={{ background: c }}
+                          className={"w-6 h-6 rounded-full " + (ink === c ? "ring-2 ring-primary ring-offset-2 ring-offset-card" : "")}
+                        />
+                      ))}
+                    </div>
+                  </Field>
                 </>
               ) : (
-                <>
-                  <PenTool className="w-5 h-5 mr-2" />
-                  Sign PDF
-                </>
+                <label className="flex flex-col items-center justify-center gap-2 h-36 rounded-md border border-dashed border-border bg-dots cursor-pointer hover:bg-muted/40">
+                  {sigPreview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={sigPreview} alt="Signature" className="max-h-28 max-w-[90%] object-contain" />
+                  ) : (
+                    <>
+                      <Upload className="w-5 h-5 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">PNG with transparent background works best</span>
+                    </>
+                  )}
+                  <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => setSig(e.target.files?.[0] ?? null)} />
+                </label>
               )}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+            </div>
 
-      {error && (
-        <div className="p-6 rounded-3xl border-2 border-destructive/30 bg-destructive/5 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-destructive text-white flex items-center justify-center shrink-0">
-            <AlertCircle className="w-6 h-6" />
+            <div className="space-y-4">
+              <Field label="Placement">
+                <ChoiceGrid value={position} onChange={setPosition} options={POSITIONS} />
+              </Field>
+              <FieldGrid>
+                <Field label="Pages">
+                  <Segmented
+                    size="sm"
+                    value={pages}
+                    onChange={setPages}
+                    options={[
+                      { value: "last", label: "Last" },
+                      { value: "first", label: "First" },
+                      { value: "all", label: "All" },
+                    ]}
+                  />
+                </Field>
+                <Field label={`Width — ${size}% of page`}>
+                  <Slider min={10} max={60} step={1} value={[size]} onValueChange={(v) => setSize(v[0])} />
+                </Field>
+              </FieldGrid>
+            </div>
           </div>
-          <div>
-            <h3 className="font-bold text-destructive">Signing Failed</h3>
-            <p className="text-sm text-destructive/80">{error}</p>
-          </div>
-        </div>
-      )}
+        }
+        action={{ label: "Sign PDF", busyLabel: "Signing…", icon: <PenTool />, onClick: sign, disabled: !sig }}
+      />
     </ToolLayout>
   );
 }

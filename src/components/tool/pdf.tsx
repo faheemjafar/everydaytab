@@ -49,6 +49,80 @@ export function parsePageList(input: string, max: number): number[] | null {
   return Array.from(out).sort((x, y) => x - y);
 }
 
+/** Lazily loads pdf.js (keeps it out of bundles for tools that don't rasterise). */
+export async function loadPdfJs() {
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.mjs";
+  return pdfjs;
+}
+
+export interface RasterPage {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  /** 1-based page number */
+  index: number;
+  /** Original page size in PDF points (use this for the output page). */
+  width: number;
+  height: number;
+}
+
+/**
+ * Renders each page of a PDF to a canvas at `scale`, calling `onPage` for each.
+ * Reports progress as (done, total).
+ */
+export async function rasterizePages(
+  file: File | ArrayBuffer,
+  scale: number,
+  onPage: (p: RasterPage) => Promise<void> | void,
+  onProgress?: (done: number, total: number) => void,
+  pages?: number[]
+) {
+  const pdfjs = await loadPdfJs();
+  const data = file instanceof ArrayBuffer ? file : await file.arrayBuffer();
+  const doc = await pdfjs.getDocument({ data }).promise;
+  const list = pages ?? Array.from({ length: doc.numPages }, (_, i) => i + 1);
+  for (let k = 0; k < list.length; k++) {
+    const page = await doc.getPage(list[k]);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("Canvas is not available in this browser.");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    await onPage({ canvas, ctx, index: list[k], width: base.width, height: base.height });
+    onProgress?.(k + 1, list.length);
+    page.cleanup();
+  }
+  await doc.destroy();
+}
+
+export async function canvasToBytes(canvas: HTMLCanvasElement, type: "image/png" | "image/jpeg", quality?: number) {
+  const blob = await new Promise<Blob>((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("Could not encode page image"))), type, quality));
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+/** Thin progress bar shown while rasterising. */
+export function PdfProgress({ done, total, label = "Processing pages" }: { done: number; total: number; label?: string }) {
+  if (!total) return null;
+  return (
+    <div className="space-y-1.5 rounded-md border border-border bg-card px-3.5 py-2.5">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="tabular-nums">
+          {done} / {total}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+        <div className="h-full bg-primary transition-[width] duration-200" style={{ width: `${(done / total) * 100}%` }} />
+      </div>
+    </div>
+  );
+}
+
 export type HAlign = "left" | "center" | "right";
 export type VAlign = "top" | "bottom";
 
