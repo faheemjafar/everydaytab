@@ -1,6 +1,6 @@
 # EverydayTab
 
-> 240 free, privacy-first web tools that run entirely in your browser. No sign-up, no uploads, no watermarks, no file-size limits.
+> 200+ free, privacy-first web tools that run entirely in your browser. No sign-up, no uploads, no watermarks, no file-size limits.
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub Repo](https://img.shields.io/badge/GitHub-faheemjafar%2Feverydaytab-181717?logo=github)](https://github.com/faheemjafar/everydaytab)
@@ -13,7 +13,7 @@
 
 ## What's inside
 
-**240 tools** across **14 categories**, ordered by demand:
+**212 tools** across **14 categories**, ordered by demand:
 
 | Category | Tools | Examples |
 |---|---:|---|
@@ -23,12 +23,12 @@
 | **Audio** | 19 | Converter, trimmer, merger, compressor, equalizer, loudness normalizer, silence remover, ringtone maker |
 | **Converters** | 15 | Unix timestamp, time zones, units, temperature, number bases, Roman numerals, Morse, IBAN validator |
 | **Text** | 18 | Word counter, case converter, diff, sorter, cleaner, slugify, readability, Markdown ↔ HTML |
-| **Developer** | 65 | JSON (format, diff, schema, → TS/Go/SQL), YAML/TOML/XML, JWT, regex, cron, cURL, Docker Compose, SQL, GraphQL, IP/subnet |
+| **Developer** | 35 | JSON (format/tree, diff, schema, → TS/Go/SQL/CSV), YAML/TOML/XML, JWT verify, regex, cron, cURL → code, Docker Compose, SQL, subnet |
 | **Generators** | 13 | QR codes, barcodes, WiFi QR, UUID, ULID, tokens, passwords, Lorem Ipsum, invoices, ASCII art |
 | **Color** | 9 | HEX/RGB/HSL/OKLCH/LAB converter, palette extractor, contrast checker, color-blindness simulator, name finder |
 | **Math** | 16 | Calculator, expression evaluator, percentage, fractions, BMI, calories, salary, tips, dates, age, ETA |
 | **Security** | 15 | Hashes, HMAC, bcrypt, AES, RSA keys, JWT generator, OTP/TOTP, BIP39, password strength, SSL decoder |
-| **SEO** | 7 | Meta tags, Open Graph, robots.txt, sitemap, FAQ schema, keyword analyzer, URL slugs |
+| **SEO** | 9 | Meta tags, Open Graph, robots.txt, sitemap, FAQ schema, keyword analyzer, URL slugs |
 | **Markdown** | 5 | Live editor, table generator, cheatsheet, → HTML, file combiner |
 | **Files** | 3 | ZIP, archive extractor, batch renamer |
 
@@ -37,7 +37,7 @@ Heavy lifting (audio, video, PDF) is done with WebAssembly builds of FFmpeg, pdf
 ## Principles
 
 - **Privacy first.** Nothing you paste or upload leaves your device. There are no accounts and no server-side processing.
-- **Fast to reach.** `⌘K` / `Ctrl+K` searches all 240 tools; the sidebar opens any category's tool list on hover and can be pinned; recents and favorites are one click away.
+- **Fast to reach.** `⌘K` / `Ctrl+K` searches every tool; the sidebar opens any category's tool list on hover and can be pinned; recents and favorites are one click away.
 - **Consistent.** One design system ("Workbench": warm neutrals, a single accent, 6px radius, no blur) and a shared set of tool primitives, so every tool behaves the same.
 - **Yours to tune.** Settings for theme, accent colour, density, font size, sidebar labels/pinning, guide visibility, and export/import of your local data. `⌘,` opens it.
 - **Works everywhere.** Icon rail + flyouts on desktop; bottom tab bar and full-screen browser on mobile. Installable as a PWA.
@@ -118,7 +118,7 @@ Conventions for the UI system are in [`AGENTS.md`](AGENTS.md).
 
 ## Roadmap
 
-- [ ] Migrate remaining tools onto the shared primitives (115 of 240 done — PDF, Image, Video, Audio, Converters and Text complete)
+- [ ] Migrate remaining tools onto the shared primitives (Developer pruned to 35 tools; PDF, Image, Video, Audio, Converters, Text and Developer migrated)
 - [ ] Build-time popularity ranking from analytics exports
 - [ ] More PDF tools (OCR, redaction, form filling)
 - [ ] Batch/queue processing for file-based tools

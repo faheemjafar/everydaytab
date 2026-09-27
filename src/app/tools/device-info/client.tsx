@@ -1,128 +1,76 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
+import { UAParser } from "ua-parser-js";
 import { ToolLayout } from "@/components/tool-layout";
+import { CopyButton, ToolPanel } from "@/components/tool";
+import { useMounted } from "@/lib/local-store";
 
-import { useState, useEffect } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { 
-  Monitor, 
-  Smartphone, 
-  Cpu, 
-  Globe, 
-  Zap,
-  Info,
-  Maximize2,
-  Battery,
-  Wifi,
-  Navigation,
-  Languages,
-  MousePointer2,
-  HardDrive,
-  RefreshCw
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+type Nav = Navigator & { deviceMemory?: number; connection?: { effectiveType?: string; downlink?: number; rtt?: number; saveData?: boolean }; userAgentData?: { platform?: string; mobile?: boolean } };
+
+// Re-read on resize/orientation/online changes.
+const subscribe = (cb: () => void) => {
+  const evs = ["resize", "orientationchange", "online", "offline"];
+  evs.forEach((e) => window.addEventListener(e, cb));
+  const mq = window.matchMedia("(prefers-color-scheme: dark)");
+  mq.addEventListener("change", cb);
+  return () => { evs.forEach((e) => window.removeEventListener(e, cb)); mq.removeEventListener("change", cb); };
+};
+let cache = "";
+const snapshot = () => {
+  const s = `${innerWidth}x${innerHeight}|${screen.orientation?.type}|${navigator.onLine}|${matchMedia("(prefers-color-scheme: dark)").matches}`;
+  if (s !== cache) cache = s;
+  return cache;
+};
+
+function collect(): [string, [string, string][]][] {
+  const n = navigator as Nav;
+  const ua = new UAParser(navigator.userAgent).getResult();
+  const mq = (q: string) => matchMedia(q).matches;
+  let webgl = "—";
+  try {
+    const gl = document.createElement("canvas").getContext("webgl");
+    const ext = gl?.getExtension("WEBGL_debug_renderer_info");
+    webgl = ext && gl ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : gl ? "Available" : "Not supported";
+  } catch {
+    /* ignore */
+  }
+  return [
+    ["Browser", [["Browser", `${ua.browser.name ?? "?"} ${ua.browser.version ?? ""}`], ["Engine", `${ua.engine.name ?? "?"} ${ua.engine.version ?? ""}`], ["Language", navigator.languages?.join(", ") || navigator.language], ["Cookies", navigator.cookieEnabled ? "Enabled" : "Disabled"], ["Do Not Track", navigator.doNotTrack === "1" ? "On" : "Off"], ["Online", navigator.onLine ? "Yes" : "No"]]],
+    ["System", [["OS", `${ua.os.name ?? "?"} ${ua.os.version ?? ""}`], ["Device", ua.device.vendor ? `${ua.device.vendor} ${ua.device.model ?? ""}` : ua.device.type ?? "Desktop"], ["CPU cores", String(navigator.hardwareConcurrency || "—")], ["Memory (approx.)", n.deviceMemory ? `≥ ${n.deviceMemory} GB` : "—"], ["GPU", webgl], ["Touch points", String(navigator.maxTouchPoints)]]],
+    ["Screen", [["Screen", `${screen.width} × ${screen.height}`], ["Viewport", `${innerWidth} × ${innerHeight}`], ["Pixel ratio", String(devicePixelRatio)], ["Colour depth", `${screen.colorDepth}-bit`], ["Orientation", screen.orientation?.type ?? "—"], ["HDR / wide gamut", mq("(dynamic-range: high)") ? "HDR" : mq("(color-gamut: p3)") ? "P3" : "sRGB"]]],
+    ["Preferences", [["Colour scheme", mq("(prefers-color-scheme: dark)") ? "Dark" : "Light"], ["Reduced motion", mq("(prefers-reduced-motion: reduce)") ? "Yes" : "No"], ["High contrast", mq("(prefers-contrast: more)") ? "Yes" : "No"], ["Pointer", mq("(pointer: coarse)") ? "Touch (coarse)" : "Mouse (fine)"], ["Time zone", Intl.DateTimeFormat().resolvedOptions().timeZone], ["Locale", Intl.DateTimeFormat().resolvedOptions().locale]]],
+    ["Network", [["Connection", n.connection?.effectiveType ?? "—"], ["Downlink", n.connection?.downlink ? `${n.connection.downlink} Mb/s` : "—"], ["Round-trip", n.connection?.rtt ? `${n.connection.rtt} ms` : "—"], ["Data saver", n.connection?.saveData ? "On" : "Off"]]],
+  ];
+}
 
 export default function DeviceInformation() {
-  const [info, setInfo] = useState<any>(null);
-
-  useEffect(() => {
-    const updateInfo = () => {
-      setInfo({
-        screen: {
-          resolution: `${window.screen.width} x ${window.screen.height}`,
-          available: `${window.screen.availWidth} x ${window.screen.availHeight}`,
-          colorDepth: `${window.screen.colorDepth}-bit`,
-          pixelRatio: window.devicePixelRatio,
-          orientation: window.screen.orientation?.type || "N/A"
-        },
-        browser: {
-          vendor: navigator.vendor,
-          language: navigator.language,
-          cookies: navigator.cookieEnabled ? "Enabled" : "Disabled",
-          online: navigator.onLine ? "Yes" : "No",
-          doNotTrack: navigator.doNotTrack === "1" ? "Yes" : "No",
-          platform: (navigator as any).platform || "N/A"
-        },
-        hardware: {
-          cores: navigator.hardwareConcurrency || "N/A",
-          memory: (navigator as any).deviceMemory ? `${(navigator as any).deviceMemory} GB` : "N/A",
-          maxTouchPoints: navigator.maxTouchPoints
-        }
-      });
-    };
-
-    updateInfo();
-    window.addEventListener("resize", updateInfo);
-    return () => window.removeEventListener("resize", updateInfo);
-  }, []);
-
-  const InfoCard = ({ title, icon: Icon, data }: { title: string, icon: any, data: any }) => (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Icon className="w-4 h-4 text-primary" />
-        <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">{title}</span>
-      </div>
-      <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden transition-all hover:shadow-2xl hover:shadow-primary/10">
-        <CardContent className="p-8">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-6">
-            {Object.entries(data).map(([key, value]) => (
-              <div key={key} className="space-y-1">
-                <p className="text-[10px] font-bold uppercase text-muted-foreground/60 tracking-wider">
-                  {key.replace(/([A-Z])/g, ' $1').trim()}
-                </p>
-                <p className="text-lg font-bold truncate">{String(value)}</p>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
+  const mounted = useMounted();
+  useSyncExternalStore(subscribe, snapshot, () => "");
+  const groups = mounted ? collect() : [];
+  const text = groups.map(([g, rows]) => `${g}\n${rows.map(([k, v]) => `  ${k}: ${v}`).join("\n")}`).join("\n\n");
 
   return (
     <ToolLayout toolId="device-info">
-
-      {!info ? (
-        <div className="h-96 flex items-center justify-center">
-          <RefreshCw className="w-8 h-8 text-primary animate-spin" />
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted-foreground">Read from your browser locally — nothing is sent anywhere. Updates live as you resize.</p>
+          <CopyButton text={text} label="Copy report" disabled={!mounted} />
         </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <InfoCard title="Screen & Display" icon={Maximize2} data={info.screen} />
-            <InfoCard title="Hardware Specs" icon={Cpu} data={info.hardware} />
-          </div>
-          
-          <InfoCard title="Browser Capabilities" icon={Globe} data={info.browser} />
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 pt-4">
-            {[
-              { label: "Battery Status", icon: Battery, value: "Web API Required" },
-              { label: "Connection", icon: Wifi, value: info.browser.online === "Yes" ? "Online" : "Offline" },
-              { label: "Navigation", icon: Navigation, value: "HTTPS Only" },
-              { label: "Language", icon: Languages, value: info.browser.language }
-            ].map((item, i) => (
-              <div key={i} className="p-6 rounded-3xl bg-muted/20 border border-border/40 flex flex-col items-center justify-center text-center gap-3">
-                <item.icon className="w-6 h-6 text-primary/40" />
-                <div>
-                  <p className="text-[10px] font-bold uppercase text-muted-foreground mb-1">{item.label}</p>
-                  <p className="text-sm font-bold">{item.value}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="p-8 rounded-[2.5rem] bg-primary/5 border border-primary/10 flex items-start gap-6">
-        <div className="w-16 h-16 rounded-3xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
-          <Zap className="w-8 h-8" />
-        </div>
-        <div className="space-y-2">
-          <h3 className="text-lg font-bold text-primary">Privacy Note</h3>
-          <p className="text-sm text-muted-foreground leading-relaxed max-w-3xl">
-            This information is retrieved using standard Web APIs available to any website you visit. It helps developers optimize layouts and features for your specific hardware. No data is collected or sent to our servers.
-          </p>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {groups.map(([title, rows]) => (
+            <ToolPanel key={title} title={title}>
+              <dl className="divide-y divide-border">
+                {rows.map(([k, v]) => (
+                  <div key={k} className="flex items-center gap-3 px-3.5 h-9 text-[13px]">
+                    <dt className="w-32 shrink-0 text-xs text-muted-foreground">{k}</dt>
+                    <dd className="flex-1 font-mono truncate" title={v}>{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </ToolPanel>
+          ))}
+          {!mounted && <div className="h-64 rounded-md border border-border bg-card sm:col-span-2 xl:col-span-3" />}
         </div>
       </div>
     </ToolLayout>

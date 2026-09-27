@@ -1,188 +1,68 @@
 "use client";
 
-import { ToolLayout } from "@/components/tool-layout";
-
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { 
-  FileText, 
-  Search, 
-  Copy, 
-  Check, 
-  Zap,
-  Info,
-  ExternalLink,
-  Filter,
-  FileCode,
-  FileImage,
-  FileAudio,
-  FileVideo,
-  Globe
-} from "lucide-react";
-import { cn } from "@/lib/utils";
 import mime from "mime-types";
+import { ToolLayout } from "@/components/tool-layout";
+import { Input } from "@/components/ui/input";
+import { CopyButton, Segmented, StatusBadge, ToolPanel } from "@/components/tool";
 
-// Common MIME types for quick access if mime-types list is too long to display all
-const COMMON_MIMES = [
-  "application/json", "application/pdf", "application/zip", "application/xml",
-  "image/jpeg", "image/png", "image/gif", "image/svg+xml",
-  "text/html", "text/css", "text/javascript", "text/plain", "text/csv",
-  "audio/mpeg", "audio/wav", "video/mp4", "video/webm"
-];
+const ALL = Object.entries(mime.extensions as Record<string, string[]>)
+  .map(([type, exts]) => ({ type, exts, group: type.split("/")[0] }))
+  .sort((a, b) => a.type.localeCompare(b.type));
+
+const COMMON = new Set(["application/json", "application/pdf", "application/zip", "application/xml", "application/octet-stream", "application/javascript", "application/wasm", "image/jpeg", "image/png", "image/gif", "image/webp", "image/avif", "image/svg+xml", "text/html", "text/css", "text/plain", "text/csv", "text/markdown", "audio/mpeg", "audio/wav", "video/mp4", "video/webm", "font/woff2", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]);
+
+const GROUPS = ["all", "application", "image", "text", "audio", "video", "font", "model"] as const;
+type Group = (typeof GROUPS)[number];
 
 export default function MIMETypes() {
-  const [search, setSearch] = useState("");
-  const [copied, setCopied] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const [group, setGroup] = useState<Group>("all");
+  const [commonOnly, setCommonOnly] = useState(false);
 
-  // We can't easily iterate all mime types from the library, so we provide a search and a list of common ones
-  const getInfo = (query: string) => {
-    if (!query) return null;
-    const isExt = query.startsWith('.') || !query.includes('/');
-    const ext = isExt ? (query.startsWith('.') ? query.slice(1) : query) : mime.extension(query);
-    const type = isExt ? mime.lookup(query) : query;
-    
-    if (!type && !ext) return null;
-    
-    return {
-      type: type || "Unknown",
-      extension: ext ? `.${ext}` : "Unknown",
-      isCommon: COMMON_MIMES.includes(type as string)
-    };
-  };
+  const t = q.trim().toLowerCase().replace(/^\*?\./, "");
+  // Exact answer for a filename/extension or a MIME type.
+  const exact = t ? (t.includes("/") ? { type: t, exts: mime.extensions[t] ?? [] } : mime.lookup(t) ? { type: mime.lookup(t) as string, exts: mime.extensions[mime.lookup(t) as string] ?? [] } : null) : null;
 
-  const searchResult = getInfo(search);
-
-  const copy = (val: string, id: string) => {
-    navigator.clipboard.writeText(val);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
-  };
-
-  const getIcon = (type: string) => {
-    if (type.startsWith('image/')) return FileImage;
-    if (type.startsWith('audio/')) return FileAudio;
-    if (type.startsWith('video/')) return FileVideo;
-    if (type.startsWith('text/')) return FileText;
-    if (type.includes('javascript') || type.includes('json') || type.includes('xml')) return FileCode;
-    return Globe;
-  };
+  const list = ALL.filter((m) => (group === "all" || m.group === group) && (!commonOnly || COMMON.has(m.type)) && (!t || m.type.includes(t) || m.exts.some((e) => e.startsWith(t)))).slice(0, 400);
 
   return (
     <ToolLayout toolId="mime-types">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Search Panel */}
-        <div className="lg:col-span-5 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-6">
-              <div className="space-y-4">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Search Database</Label>
-                <div className="relative">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                  <Input 
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="e.g. .png or application/json"
-                    className="h-14 pl-12 pr-6 rounded-2xl bg-muted/30 border-border/40 font-bold focus:ring-primary/20"
-                  />
-                </div>
-                <p className="text-[10px] text-muted-foreground italic px-1">
-                  Try searching with an extension (like <strong>.jpg</strong>) or a MIME type (like <strong>text/html</strong>).
-                </p>
-              </div>
-
-              {searchResult && (
-                <div className="pt-6 border-t border-border/40 space-y-6 animate-in fade-in slide-in-from-top-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
-                      {(() => {
-                        const Icon = getIcon(searchResult.type as string);
-                        return <Icon className="w-6 h-6" />;
-                      })()}
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-lg leading-none mb-1">{searchResult.extension}</h3>
-                      <p className="text-xs text-muted-foreground font-mono">{searchResult.type}</p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => copy(searchResult.type as string, 'type')}
-                      className="rounded-xl h-10 text-[10px] font-bold uppercase tracking-wider border-border/40"
-                    >
-                      {copied === 'type' ? <Check className="w-3.5 h-3.5 mr-2 text-green-500" /> : <Copy className="w-3.5 h-3.5 mr-2" />}
-                      Copy Type
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => copy(searchResult.extension as string, 'ext')}
-                      className="rounded-xl h-10 text-[10px] font-bold uppercase tracking-wider border-border/40"
-                    >
-                      {copied === 'ext' ? <Check className="w-3.5 h-3.5 mr-2 text-green-500" /> : <Copy className="w-3.5 h-3.5 mr-2" />}
-                      Copy Ext
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Pro Tip</h3>
-            </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              MIME types (Multipurpose Internet Mail Extensions) tell the browser how to handle files. They are crucial for setting the <code>Content-Type</code> header in APIs.
-            </p>
+      <div className="space-y-3">
+        <ToolPanel bodyClassName="p-3 space-y-3">
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Extension, filename or MIME type — e.g. .webp, report.docx, application/json" className="h-11 font-mono" autoFocus />
+          <div className="flex flex-wrap items-center gap-3">
+            <Segmented size="sm" value={group} onChange={setGroup} options={GROUPS.map((g) => ({ value: g, label: g === "all" ? "All" : g }))} />
+            <label className="inline-flex items-center gap-2 text-[13px]">
+              <input type="checkbox" checked={commonOnly} onChange={(e) => setCommonOnly(e.target.checked)} className="size-3.5 accent-primary" />
+              Common only
+            </label>
           </div>
-        </div>
+        </ToolPanel>
 
-        {/* Common Types Grid */}
-        <div className="lg:col-span-7 space-y-6">
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-primary" />
-            <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Common MIME Types</span>
-          </div>
+        {exact && (
+          <ToolPanel bodyClassName="p-3.5 flex flex-wrap items-center gap-3">
+            <code className="font-mono text-lg">{exact.type}</code>
+            <CopyButton text={exact.type} iconOnly />
+            <span className="text-muted-foreground">·</span>
+            {exact.exts.length ? exact.exts.map((e) => <StatusBadge key={e}>.{e}</StatusBadge>) : <span className="text-xs text-muted-foreground">No registered extension</span>}
+            {mime.charset(exact.type) && <span className="text-xs text-muted-foreground">charset: {mime.charset(exact.type)}</span>}
+            <CopyButton text={`Content-Type: ${mime.contentType(exact.type) || exact.type}`} label="Copy header" className="ml-auto" />
+          </ToolPanel>
+        )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {COMMON_MIMES.map((type) => {
-              const ext = mime.extension(type);
-              const Icon = getIcon(type);
-              return (
-                <div 
-                  key={type}
-                  onClick={() => setSearch(type)}
-                  className={cn(
-                    "group p-4 rounded-2xl bg-card border transition-all cursor-pointer flex items-center justify-between",
-                    search === type ? "border-primary bg-primary/5 shadow-lg shadow-primary/5" : "border-border/40 hover:border-primary/20 hover:bg-muted/30"
-                  )}
-                >
-                  <div className="flex items-center gap-4">
-                    <div className={cn(
-                      "w-10 h-10 rounded-xl flex items-center justify-center transition-colors",
-                      search === type ? "bg-primary text-white" : "bg-primary/5 text-primary group-hover:bg-primary/10"
-                    )}>
-                      <Icon className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-black font-mono">.{ext}</p>
-                      <p className="text-[10px] text-muted-foreground font-medium truncate max-w-[150px]">{type}</p>
-                    </div>
-                  </div>
-                  <ExternalLink className="w-3.5 h-3.5 text-muted-foreground/30 group-hover:text-primary transition-colors" />
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <ToolPanel title={`${list.length === 400 ? "400+" : list.length} of ${ALL.length} types`}>
+          <ul className="divide-y divide-border max-h-[560px] overflow-y-auto custom-scrollbar">
+            {list.map((m) => (
+              <li key={m.type} className="group flex items-center gap-3 px-3.5 h-9 text-[13px]">
+                <code className="font-mono flex-1 truncate">{m.type}</code>
+                {COMMON.has(m.type) && <StatusBadge tone="info">common</StatusBadge>}
+                <span className="font-mono text-xs text-muted-foreground truncate max-w-[35%]">{m.exts.map((e) => `.${e}`).join(" ")}</span>
+                <CopyButton text={m.type} iconOnly className="opacity-0 group-hover:opacity-100 focus:opacity-100" />
+              </li>
+            ))}
+          </ul>
+        </ToolPanel>
       </div>
     </ToolLayout>
   );

@@ -46,7 +46,7 @@ const width = (s: string) => Array.from(s).length;
 export default function MarkdownTableGenerator() {
   const [data, setData] = useState<string[][]>([
     ["Feature", "Free", "Pro"],
-    ["Tools", "240+", "240+"],
+    ["Tools", "200+", "200+"],
     ["Price", "$0", "$0"],
   ]);
   const [align, setAlign] = useState<Align[]>(["left", "center", "center"]);

@@ -1,195 +1,133 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { 
-  Globe, 
-  Search, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  Info,
-  ExternalLink,
-  BookOpen,
-  Filter
-} from "lucide-react";
+import { CopyButton, Segmented, StatusBadge, ToolPanel } from "@/components/tool";
 import { cn } from "@/lib/utils";
 
-const HTTP_STATUS_CODES = [
-  { code: 100, name: "Continue", category: "Informational", description: "The server has received the request headers and the client should proceed to send the request body." },
-  { code: 101, name: "Switching Protocols", category: "Informational", description: "The requester has asked the server to switch protocols." },
-  { code: 200, name: "OK", category: "Success", description: "Standard response for successful HTTP requests." },
-  { code: 201, name: "Created", category: "Success", description: "The request has been fulfilled, resulting in the creation of a new resource." },
-  { code: 202, name: "Accepted", category: "Success", description: "The request has been accepted for processing, but the processing has not been completed." },
-  { code: 204, name: "No Content", category: "Success", description: "The server successfully processed the request and is not returning any content." },
-  { code: 301, name: "Moved Permanently", category: "Redirection", description: "This and all future requests should be directed to the given URI." },
-  { code: 302, name: "Found", category: "Redirection", description: "The resource was found, but at a different URI." },
-  { code: 304, name: "Not Modified", category: "Redirection", description: "Indicates that the resource has not been modified since the version specified by the request headers." },
-  { code: 400, name: "Bad Request", category: "Client Error", description: "The server cannot or will not process the request due to an apparent client error." },
-  { code: 401, name: "Unauthorized", category: "Client Error", description: "Similar to 403 Forbidden, but specifically for use when authentication is required and has failed or has not yet been provided." },
-  { code: 403, name: "Forbidden", category: "Client Error", description: "The request contained valid data and was understood by the server, but the server is refusing action." },
-  { code: 404, name: "Not Found", category: "Client Error", description: "The requested resource could not be found but may be available in the future." },
-  { code: 405, name: "Method Not Allowed", category: "Client Error", description: "A request method is not supported for the requested resource." },
-  { code: 408, name: "Request Timeout", category: "Client Error", description: "The server timed out waiting for the request." },
-  { code: 429, name: "Too Many Requests", category: "Client Error", description: "The user has sent too many requests in a given amount of time." },
-  { code: 500, name: "Internal Server Error", category: "Server Error", description: "A generic error message, given when an unexpected condition was encountered and no more specific message is suitable." },
-  { code: 502, name: "Bad Gateway", category: "Server Error", description: "The server was acting as a gateway or proxy and received an invalid response from the upstream server." },
-  { code: 503, name: "Service Unavailable", category: "Server Error", description: "The server cannot handle the request (because it is overloaded or down for maintenance)." },
-  { code: 504, name: "Gateway Timeout", category: "Server Error", description: "The server was acting as a gateway or proxy and did not receive a timely response from the upstream server." },
-];
+type Code = { code: number; name: string; desc: string; rfc?: string; unofficial?: boolean };
+
+const CODES: Code[] = [
+  { code: 100, name: "Continue", desc: "Headers received; the client should send the request body.", rfc: "RFC 9110" },
+  { code: 101, name: "Switching Protocols", desc: "Server agrees to switch protocol, e.g. to WebSocket via Upgrade.", rfc: "RFC 9110" },
+  { code: 102, name: "Processing", desc: "WebDAV: request received and still being processed.", rfc: "RFC 2518" },
+  { code: 103, name: "Early Hints", desc: "Preload hints (Link headers) sent before the final response.", rfc: "RFC 8297" },
+  { code: 200, name: "OK", desc: "Standard success. Body depends on the method.", rfc: "RFC 9110" },
+  { code: 201, name: "Created", desc: "A new resource was created; its URL is usually in the Location header.", rfc: "RFC 9110" },
+  { code: 202, name: "Accepted", desc: "Request accepted for asynchronous processing that hasn't finished.", rfc: "RFC 9110" },
+  { code: 203, name: "Non-Authoritative Information", desc: "Payload was modified by a transforming proxy.", rfc: "RFC 9110" },
+  { code: 204, name: "No Content", desc: "Success with no body — common for DELETE and PUT.", rfc: "RFC 9110" },
+  { code: 205, name: "Reset Content", desc: "Success; the client should reset the document view (e.g. clear a form).", rfc: "RFC 9110" },
+  { code: 206, name: "Partial Content", desc: "Only the requested byte range is returned (Range header, video seeking, resumable downloads).", rfc: "RFC 9110" },
+  { code: 207, name: "Multi-Status", desc: "WebDAV: body contains multiple status codes for sub-requests.", rfc: "RFC 4918" },
+  { code: 208, name: "Already Reported", desc: "WebDAV: members already listed earlier in the response.", rfc: "RFC 5842" },
+  { code: 226, name: "IM Used", desc: "Response is the result of instance manipulations (delta encoding).", rfc: "RFC 3229" },
+  { code: 300, name: "Multiple Choices", desc: "Several representations are available; the client should choose.", rfc: "RFC 9110" },
+  { code: 301, name: "Moved Permanently", desc: "Permanent redirect. Search engines transfer ranking. Clients may change POST to GET.", rfc: "RFC 9110" },
+  { code: 302, name: "Found", desc: "Temporary redirect. Clients may change POST to GET.", rfc: "RFC 9110" },
+  { code: 303, name: "See Other", desc: "Redirect to another URL with GET — typical after a form POST.", rfc: "RFC 9110" },
+  { code: 304, name: "Not Modified", desc: "Cached copy is still valid (If-None-Match / If-Modified-Since). No body.", rfc: "RFC 9110" },
+  { code: 307, name: "Temporary Redirect", desc: "Temporary redirect that keeps the method and body.", rfc: "RFC 9110" },
+  { code: 308, name: "Permanent Redirect", desc: "Permanent redirect that keeps the method and body.", rfc: "RFC 9110" },
+  { code: 400, name: "Bad Request", desc: "Malformed syntax, invalid framing or failed validation.", rfc: "RFC 9110" },
+  { code: 401, name: "Unauthorized", desc: "Authentication is missing or invalid. Should include WWW-Authenticate.", rfc: "RFC 9110" },
+  { code: 402, name: "Payment Required", desc: "Reserved; used by some APIs for billing or quota issues.", rfc: "RFC 9110" },
+  { code: 403, name: "Forbidden", desc: "Authenticated but not allowed. Re-authenticating won't help.", rfc: "RFC 9110" },
+  { code: 404, name: "Not Found", desc: "No resource at this URL (or the server hides that it exists).", rfc: "RFC 9110" },
+  { code: 405, name: "Method Not Allowed", desc: "The method isn't supported here. Must include an Allow header.", rfc: "RFC 9110" },
+  { code: 406, name: "Not Acceptable", desc: "Nothing matches the Accept* headers sent by the client.", rfc: "RFC 9110" },
+  { code: 407, name: "Proxy Authentication Required", desc: "Authenticate with the proxy first.", rfc: "RFC 9110" },
+  { code: 408, name: "Request Timeout", desc: "The server gave up waiting for the client to finish the request.", rfc: "RFC 9110" },
+  { code: 409, name: "Conflict", desc: "Conflicts with the current state — edit conflicts, duplicate keys.", rfc: "RFC 9110" },
+  { code: 410, name: "Gone", desc: "Permanently removed with no forwarding address. Stronger than 404 for SEO.", rfc: "RFC 9110" },
+  { code: 411, name: "Length Required", desc: "A Content-Length header is required.", rfc: "RFC 9110" },
+  { code: 412, name: "Precondition Failed", desc: "A conditional header (If-Match, If-Unmodified-Since) didn't match.", rfc: "RFC 9110" },
+  { code: 413, name: "Content Too Large", desc: "Request body exceeds the server's limit.", rfc: "RFC 9110" },
+  { code: 414, name: "URI Too Long", desc: "The URL is longer than the server will process.", rfc: "RFC 9110" },
+  { code: 415, name: "Unsupported Media Type", desc: "The Content-Type of the body isn't supported.", rfc: "RFC 9110" },
+  { code: 416, name: "Range Not Satisfiable", desc: "The requested byte range is outside the resource.", rfc: "RFC 9110" },
+  { code: 417, name: "Expectation Failed", desc: "The Expect header can't be met.", rfc: "RFC 9110" },
+  { code: 418, name: "I'm a teapot", desc: "April Fools' joke from HTCPCP; sometimes used to refuse bots.", rfc: "RFC 2324" },
+  { code: 421, name: "Misdirected Request", desc: "Sent to a server that can't produce a response for this host (HTTP/2 connection reuse).", rfc: "RFC 9110" },
+  { code: 422, name: "Unprocessable Content", desc: "Well-formed but semantically invalid — common for validation errors in APIs.", rfc: "RFC 9110" },
+  { code: 423, name: "Locked", desc: "WebDAV: the resource is locked.", rfc: "RFC 4918" },
+  { code: 424, name: "Failed Dependency", desc: "WebDAV: failed because a previous request failed.", rfc: "RFC 4918" },
+  { code: 425, name: "Too Early", desc: "Server won't process a request that might be replayed (TLS early data).", rfc: "RFC 8470" },
+  { code: 426, name: "Upgrade Required", desc: "Client must switch to another protocol (see Upgrade header).", rfc: "RFC 9110" },
+  { code: 428, name: "Precondition Required", desc: "Request must be conditional to avoid lost updates.", rfc: "RFC 6585" },
+  { code: 429, name: "Too Many Requests", desc: "Rate limited. Check the Retry-After header.", rfc: "RFC 6585" },
+  { code: 431, name: "Request Header Fields Too Large", desc: "Headers (often cookies) are too large.", rfc: "RFC 6585" },
+  { code: 451, name: "Unavailable For Legal Reasons", desc: "Blocked for legal reasons, e.g. censorship or a court order.", rfc: "RFC 7725" },
+  { code: 500, name: "Internal Server Error", desc: "Generic server failure — an unhandled exception.", rfc: "RFC 9110" },
+  { code: 501, name: "Not Implemented", desc: "The server doesn't support the functionality required.", rfc: "RFC 9110" },
+  { code: 502, name: "Bad Gateway", desc: "A proxy or gateway got an invalid response from the upstream server.", rfc: "RFC 9110" },
+  { code: 503, name: "Service Unavailable", desc: "Overloaded or down for maintenance. May include Retry-After.", rfc: "RFC 9110" },
+  { code: 504, name: "Gateway Timeout", desc: "A proxy or gateway didn't get an upstream response in time.", rfc: "RFC 9110" },
+  { code: 505, name: "HTTP Version Not Supported", desc: "The HTTP version used isn't supported.", rfc: "RFC 9110" },
+  { code: 506, name: "Variant Also Negotiates", desc: "Content negotiation configuration error.", rfc: "RFC 2295" },
+  { code: 507, name: "Insufficient Storage", desc: "WebDAV: the server can't store the representation.", rfc: "RFC 4918" },
+  { code: 508, name: "Loop Detected", desc: "WebDAV: infinite loop detected.", rfc: "RFC 5842" },
+  { code: 511, name: "Network Authentication Required", desc: "Log in to the network first (captive portal).", rfc: "RFC 6585" },
+  { code: 499, name: "Client Closed Request", desc: "nginx: the client closed the connection before the response.", unofficial: true },
+  { code: 520, name: "Web Server Returned an Unknown Error", desc: "Cloudflare: origin returned an empty or unexpected response.", unofficial: true },
+  { code: 521, name: "Web Server Is Down", desc: "Cloudflare: origin refused the connection.", unofficial: true },
+  { code: 522, name: "Connection Timed Out", desc: "Cloudflare: TCP connection to the origin timed out.", unofficial: true },
+  { code: 524, name: "A Timeout Occurred", desc: "Cloudflare: origin didn't send an HTTP response within 100 s.", unofficial: true },
+].sort((a, b) => a.code - b.code);
+
+const CLASSES = [
+  { id: "all", label: "All" },
+  { id: "1", label: "1xx Info" },
+  { id: "2", label: "2xx Success" },
+  { id: "3", label: "3xx Redirect" },
+  { id: "4", label: "4xx Client" },
+  { id: "5", label: "5xx Server" },
+] as const;
+type Cls = (typeof CLASSES)[number]["id"];
+const TONE: Record<string, "info" | "success" | "warning" | "error" | "neutral"> = { "1": "neutral", "2": "success", "3": "info", "4": "warning", "5": "error" };
 
 export default function HTTPStatusCodes() {
-  const [search, setSearch] = useState("");
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  const [copied, setCopied] = useState<number | null>(null);
+  const [q, setQ] = useState("");
+  const [cls, setCls] = useState<Cls>("all");
+  const [unofficial, setUnofficial] = useState(true);
 
-  const categories = ["Informational", "Success", "Redirection", "Client Error", "Server Error"];
-
-  const filteredCodes = HTTP_STATUS_CODES.filter(item => {
-    const matchesSearch = item.code.toString().includes(search) || item.name.toLowerCase().includes(search.toLowerCase());
-    const matchesCategory = activeCategory ? item.category === activeCategory : true;
-    return matchesSearch && matchesCategory;
-  });
-
-  const copyCode = (code: number) => {
-    navigator.clipboard.writeText(code.toString());
-    setCopied(code);
-    setTimeout(() => setCopied(null), 2000);
-  };
-
-  const getCategoryColor = (category: string) => {
-    switch (category) {
-      case "Informational": return "bg-blue-500/10 text-blue-600 border-blue-500/20";
-      case "Success": return "bg-green-500/10 text-green-600 border-green-500/20";
-      case "Redirection": return "bg-purple-500/10 text-purple-600 border-purple-500/20";
-      case "Client Error": return "bg-orange-500/10 text-orange-600 border-orange-500/20";
-      case "Server Error": return "bg-destructive/10 text-destructive border-destructive/20";
-      default: return "";
-    }
-  };
+  const list = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return CODES.filter((c) => (cls === "all" || String(c.code)[0] === cls) && (unofficial || !c.unofficial) && (!t || String(c.code).startsWith(t) || c.name.toLowerCase().includes(t) || c.desc.toLowerCase().includes(t)));
+  }, [q, cls, unofficial]);
 
   return (
     <ToolLayout toolId="http-status-codes">
+      <div className="space-y-3">
+        <ToolPanel bodyClassName="p-3 flex flex-wrap items-center gap-3">
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search code, name or meaning — e.g. 429, redirect, cache" className="flex-1 min-w-60" autoFocus />
+          <Segmented size="sm" value={cls} onChange={setCls} options={CLASSES.map((c) => ({ value: c.id, label: c.label }))} />
+          <label className="inline-flex items-center gap-2 text-[13px]">
+            <input type="checkbox" checked={unofficial} onChange={(e) => setUnofficial(e.target.checked)} className="size-3.5 accent-primary" />
+            nginx / Cloudflare codes
+          </label>
+        </ToolPanel>
 
-      <div className="flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
-        <div className="relative w-full md:w-96">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input 
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search code or name (e.g. 404 or Not Found)"
-            className="h-12 pl-12 pr-6 rounded-2xl bg-card border-border/40 font-bold focus:ring-primary/20 shadow-sm"
-          />
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant={activeCategory === null ? "default" : "outline"}
-            size="sm"
-            onClick={() => setActiveCategory(null)}
-            className="rounded-xl h-10 font-bold px-4"
-          >
-            All
-          </Button>
-          {categories.map((cat) => (
-            <Button
-              key={cat}
-              variant={activeCategory === cat ? "default" : "outline"}
-              size="sm"
-              onClick={() => setActiveCategory(cat)}
-              className={cn(
-                "rounded-xl h-10 font-bold px-4 transition-all",
-                activeCategory === cat && "shadow-lg"
-              )}
-            >
-              {cat}
-            </Button>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        {filteredCodes.map((item) => (
-          <Card 
-            key={item.code} 
-            className="group border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2rem] overflow-hidden transition-all hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-1"
-          >
-            <CardContent className="p-8 space-y-4">
-              <div className="flex justify-between items-start">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-3">
-                    <span className="text-4xl font-black tracking-tighter text-foreground leading-none">{item.code}</span>
-                    <div className={cn(
-                      "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border",
-                      getCategoryColor(item.category)
-                    )}>
-                      {item.category}
-                    </div>
-                  </div>
-                  <h3 className="text-xl font-bold tracking-tight text-foreground/90">{item.name}</h3>
+        <ToolPanel title={`${list.length} status codes`}>
+          <ul className="divide-y divide-border">
+            {list.map((c) => (
+              <li key={c.code} className="group flex items-start gap-3 px-3.5 py-2.5">
+                <span className={cn("font-mono text-lg font-semibold w-12 shrink-0 tabular-nums", { "text-emerald-600 dark:text-emerald-400": String(c.code)[0] === "2", "text-sky-600 dark:text-sky-400": String(c.code)[0] === "3", "text-amber-600 dark:text-amber-400": String(c.code)[0] === "4", "text-red-600 dark:text-red-400": String(c.code)[0] === "5" })}>{c.code}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium flex items-center gap-2">
+                    {c.name}
+                    {c.unofficial ? <StatusBadge tone="neutral">non-standard</StatusBadge> : c.rfc ? <span className="text-[11px] font-normal text-muted-foreground">{c.rfc}</span> : null}
+                  </p>
+                  <p className="text-[13px] text-muted-foreground">{c.desc}</p>
                 </div>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  onClick={() => copyCode(item.code)}
-                  className="rounded-xl h-10 w-10 text-muted-foreground hover:text-primary hover:bg-primary/10"
-                >
-                  {copied === item.code ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
-                </Button>
-              </div>
-              
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                {item.description}
-              </p>
-
-              <div className="pt-4 border-t border-border/10 flex justify-between items-center">
-                <div className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">
-                  <Globe className="w-3 h-3" />
-                  RFC Standard
-                </div>
-                <a 
-                  href={`https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/${item.code}`} 
-                  target="_blank" 
-                  rel="noreferrer"
-                  className="text-[10px] font-bold text-primary uppercase tracking-widest hover:underline flex items-center gap-1"
-                >
-                  MDN Docs
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-
-        {filteredCodes.length === 0 && (
-          <div className="col-span-full py-20 text-center space-y-4">
-            <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mx-auto">
-              <Filter className="w-10 h-10 text-muted-foreground/30" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="font-bold text-lg">No Results Found</h3>
-              <p className="text-sm text-muted-foreground">Try searching for a different code or name.</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="p-8 rounded-[2.5rem] bg-primary/5 border border-primary/10 flex items-start gap-6">
-        <div className="w-16 h-16 rounded-3xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
-          <Zap className="w-8 h-8" />
-        </div>
-        <div className="space-y-2">
-          <h3 className="text-lg font-bold text-primary">Status Code Quick Reference</h3>
-          <p className="text-sm text-muted-foreground leading-relaxed max-w-3xl">
-            HTTP status codes are divided into five classes: <strong>1xx</strong> (Informational), <strong>2xx</strong> (Success), <strong>3xx</strong> (Redirection), <strong>4xx</strong> (Client Error), and <strong>5xx</strong> (Server Error). They help developers understand the result of an HTTP request and debug issues effectively.
-          </p>
-        </div>
+                <StatusBadge tone={TONE[String(c.code)[0]]} className="hidden sm:inline-flex">{String(c.code)[0]}xx</StatusBadge>
+                <CopyButton text={`${c.code} ${c.name}`} iconOnly className="opacity-0 group-hover:opacity-100 focus:opacity-100" />
+              </li>
+            ))}
+            {!list.length && <li className="px-3.5 py-8 text-center text-xs text-muted-foreground">No status code matches “{q}”.</li>}
+          </ul>
+        </ToolPanel>
       </div>
     </ToolLayout>
   );

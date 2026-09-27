@@ -1,171 +1,71 @@
 "use client";
 
-import { ToolLayout } from "@/components/tool-layout";
-
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  Box, 
-  Copy, 
-  Check, 
-  Trash2,
-  FileCode,
-  Zap,
-  Info,
-  Terminal,
-  ArrowRight
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useMemo, useState } from "react";
 import composerize from "composerize";
+import { ToolLayout } from "@/components/tool-layout";
+import { Input } from "@/components/ui/input";
+import { Field, Segmented, TextTransform } from "@/components/tool";
+
+const SAMPLE = `docker run -d --name web -p 80:80 -p 443:443 \\
+  -v ./site:/usr/share/nginx/html:ro \\
+  --restart unless-stopped nginx:1.27
+
+docker run -d --name db \\
+  -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=app \\
+  -v pgdata:/var/lib/postgresql/data \\
+  --health-cmd "pg_isready -U postgres" postgres:16`;
+
+/** Splits input into individual `docker run` commands (handles \\ continuations). */
+const commands = (s: string) =>
+  s
+    .replace(/\\\r?\n/g, " ")
+    .split(/\n|(?=\bdocker\s+(?:container\s+)?run\b)/)
+    .map((c) => c.replace(/\s+/g, " ").trim())
+    .filter((c) => /^(sudo\s+)?docker\s+(container\s+)?run\b/.test(c))
+    .map((c) => c.replace(/^sudo\s+/, "").replace(/^docker container run/, "docker run"));
 
 export default function DockerComposeConverter() {
   const [input, setInput] = useState("");
-  const [output, setOutput] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [project, setProject] = useState("myapp");
+  const [indent, setIndent] = useState<"2" | "4">("2");
 
-  const convert = (val: string) => {
-    setInput(val);
-    setError(null);
-    if (!val.trim()) {
-      setOutput("");
-      return;
-    }
-
+  const { output, error, count } = useMemo(() => {
+    if (!input.trim()) return { output: "", error: null, count: 0 };
+    const cmds = commands(input);
+    if (!cmds.length) return { output: "", error: "No `docker run` commands found.", count: 0 };
     try {
-      // Basic cleanup for multiple lines or extra spaces
-      const cleanCommand = val.replace(/\\\n/g, ' ').replace(/\s+/g, ' ').trim();
-      const result = composerize(cleanCommand);
-      if (result) {
-        setOutput(result);
-      } else {
-        throw new Error("Could not convert command. Please ensure it is a valid 'docker run' command.");
-      }
-    } catch (e: any) {
-      setError(e.message || "Invalid docker run command");
-      setOutput("");
+      // Feed each command the compose built so far, so services merge into one file.
+      const yaml = cmds.reduce((acc, c) => composerize(c, acc, "latest", Number(indent)), "");
+      return { output: yaml.replace("<your project name>", project || "myapp"), error: null, count: cmds.length };
+    } catch (e) {
+      return { output: "", error: (e as Error).message || "Couldn't convert that command.", count: 0 };
     }
-  };
-
-  const copyToClipboard = () => {
-    if (!output) return;
-    navigator.clipboard.writeText(output);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const clear = () => {
-    setInput("");
-    setOutput("");
-    setError(null);
-  };
-
-  const exampleCommand = "docker run -p 80:80 -v /var/run/docker.sock:/var/run/docker.sock --name nginx -d nginx";
+  }, [input, project, indent]);
 
   return (
     <ToolLayout toolId="docker-compose-converter">
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
-        {/* Input Panel */}
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col min-h-[500px]">
-          <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <Terminal className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Docker Run Command</span>
-            </div>
-            <Button variant="ghost" size="icon" onClick={clear} className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive">
-              <Trash2 className="w-4 h-4" />
-            </Button>
-          </div>
-          <CardContent className="p-0 flex-1 relative">
-            <Textarea
-              placeholder={`Paste your docker run command here...\n\nExample:\n${exampleCommand}`}
-              value={input}
-              onChange={(e) => convert(e.target.value)}
-              className="w-full h-full min-h-[400px] p-8 bg-transparent border-none focus-visible:ring-0 resize-none font-mono text-sm leading-relaxed"
-            />
-          </CardContent>
-        </Card>
-
-        {/* Output Panel */}
-        <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col min-h-[500px] relative">
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 hidden lg:block">
-            <div className="w-12 h-12 rounded-full bg-background border-border/40 flex items-center justify-center text-muted-foreground shadow-xl">
-              <ArrowRight className="w-5 h-5" />
-            </div>
-          </div>
-
-          <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <FileCode className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-primary">Docker Compose YAML</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={copyToClipboard}
-              disabled={!output}
-              className={cn(
-                "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                copied && "text-green-500 hover:text-green-500"
-              )}
-            >
-              {copied ? (
-                <>
-                  <Check className="w-4 h-4 mr-2" />
-                  Copied
-                </>
-              ) : (
-                <>
-                  <Copy className="w-4 h-4 mr-2" />
-                  Copy YAML
-                </>
-              )}
-            </Button>
-          </div>
-          <CardContent className="p-0 flex-1">
-            {error ? (
-              <div className="p-8 h-full bg-destructive/5 text-destructive font-mono text-sm space-y-4">
-                <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-[10px]">
-                  <Info className="w-3 h-3" />
-                  Conversion Error
-                </div>
-                <div className="bg-destructive/10 p-4 rounded-xl border border-destructive/20 whitespace-pre-wrap">
-                  {error}
-                </div>
-              </div>
-            ) : (
-              <pre className="w-full h-full min-h-[400px] p-8 bg-primary/[0.02] font-mono text-sm leading-relaxed overflow-auto">
-                {output || <span className="text-muted-foreground italic">Output will appear here...</span>}
-              </pre>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-3">
-          <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-primary" />
-            <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Why Compose?</h3>
-          </div>
-          <p className="text-[11px] text-muted-foreground leading-relaxed">
-            Docker Compose files are much easier to maintain, version control, and share than long 'docker run' commands.
-          </p>
-        </div>
-        
-        <div className="md:col-span-2 p-6 rounded-3xl bg-muted/30 border border-border/40 space-y-3">
-          <div className="flex items-center gap-2">
-            <Info className="w-4 h-4 text-muted-foreground" />
-            <h3 className="font-bold text-xs uppercase tracking-wider text-muted-foreground">Supported Features</h3>
-          </div>
-          <p className="text-[11px] text-muted-foreground leading-relaxed">
-            This tool supports environment variables, port mapping, volume mounting, networks, restart policies, and most common 'docker run' flags.
-          </p>
-        </div>
-      </div>
+      <TextTransform
+        input={input}
+        onInput={setInput}
+        output={output}
+        error={error}
+        sample={SAMPLE}
+        inputLabel="docker run commands"
+        outputLabel={`compose.yaml${count > 1 ? ` · ${count} services` : ""}`}
+        filename="compose.yaml"
+        placeholder="docker run -d -p 8080:80 --name web nginx"
+        options={
+          <>
+            <Field label="Project name" htmlFor="pn">
+              <Input id="pn" value={project} onChange={(e) => setProject(e.target.value.replace(/[^a-z0-9_-]/gi, "").toLowerCase())} className="w-36 font-mono" />
+            </Field>
+            <Field label="Indent">
+              <Segmented size="sm" value={indent} onChange={setIndent} options={[{ value: "2", label: "2" }, { value: "4", label: "4" }]} />
+            </Field>
+            <p className="text-[11px] text-muted-foreground">Paste several commands to build a multi-service compose file. Save it as compose.yaml and run <code className="font-mono">docker compose up -d</code>.</p>
+          </>
+        }
+      />
     </ToolLayout>
   );
 }

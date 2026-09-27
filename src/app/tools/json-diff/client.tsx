@@ -1,202 +1,150 @@
 "use client";
 
+import { useMemo, useState } from "react";
+import { ArrowLeftRight } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  Split, 
-  Copy, 
-  Check, 
-  Trash2,
-  FileCode,
-  Zap,
-  AlertCircle,
-  ArrowRight,
-  Braces,
-  Search
-} from "lucide-react";
+import { ClearButton, CodeArea, CopyButton, Segmented, SplitLayout, StatusBadge, ToolAlert, ToolPanel, Toggle } from "@/components/tool";
+import { diffLines, type DiffRow } from "@/lib/diff";
 import { cn } from "@/lib/utils";
-import jsonDiff from "json-diff";
+
+const A = `{\n  "name": "EverydayTab",\n  "version": "1.0.0",\n  "private": true,\n  "tags": ["tools", "web"],\n  "author": { "name": "Faheem", "url": null },\n  "scripts": { "dev": "next dev", "build": "next build" }\n}`;
+const B = `{\n  "name": "EverydayTab",\n  "version": "2.0.0",\n  "tags": ["web", "tools", "privacy"],\n  "author": { "name": "Faheem Jafar", "url": "https://everydaytab.com" },\n  "scripts": { "dev": "next dev --turbo", "build": "next build", "lint": "eslint ." },\n  "license": "MIT"\n}`;
+
+type Change = { kind: "added" | "removed" | "changed"; path: string; from?: unknown; to?: unknown };
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+const key = (p: string, k: string | number) => (typeof k === "number" ? `${p}[${k}]` : /^[A-Za-z_$][\w$]*$/.test(k) ? `${p}.${k}` : `${p}[${JSON.stringify(k)}]`);
+const canon = (v: unknown): string => JSON.stringify(v, (_, x) => (isObj(x) ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, x[k]])) : x));
+
+function diff(a: unknown, b: unknown, path: string, unordered: boolean, out: Change[]) {
+  if (isObj(a) && isObj(b)) {
+    for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+      if (!(k in b)) out.push({ kind: "removed", path: key(path, k), from: a[k] });
+      else if (!(k in a)) out.push({ kind: "added", path: key(path, k), to: b[k] });
+      else diff(a[k], b[k], key(path, k), unordered, out);
+    }
+  } else if (Array.isArray(a) && Array.isArray(b)) {
+    if (unordered) {
+      // Multiset comparison by canonical value.
+      const rest = b.map(canon);
+      a.forEach((x, i) => {
+        const j = rest.indexOf(canon(x));
+        if (j === -1) out.push({ kind: "removed", path: key(path, i), from: x });
+        else rest[j] = "\u0000";
+      });
+      rest.forEach((c, j) => c !== "\u0000" && out.push({ kind: "added", path: key(path, j), to: b[j] }));
+    } else {
+      for (let i = 0; i < Math.max(a.length, b.length); i++) {
+        if (i >= b.length) out.push({ kind: "removed", path: key(path, i), from: a[i] });
+        else if (i >= a.length) out.push({ kind: "added", path: key(path, i), to: b[i] });
+        else diff(a[i], b[i], key(path, i), unordered, out);
+      }
+    }
+  } else if (canon(a) !== canon(b)) out.push({ kind: "changed", path, from: a, to: b });
+  return out;
+}
+
+const show = (v: unknown) => {
+  const s = JSON.stringify(v);
+  return s && s.length > 80 ? `${s.slice(0, 80)}…` : s;
+};
 
 export default function JSONDiff() {
-  const [leftJson, setLeftJson] = useState('{\n  "name": "EverydayTab",\n  "version": "1.0",\n  "active": true,\n  "tags": ["utility", "web"]\n}');
-  const [rightJson, setRightJson] = useState('{\n  "name": "EverydayTab",\n  "version": "1.1",\n  "active": false,\n  "tags": ["utility", "web", "new"]\n}');
-  const [diffResult, setDiffResult] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [left, setLeft] = useState("");
+  const [right, setRight] = useState("");
+  const [unordered, setUnordered] = useState(false);
+  const [view, setView] = useState<"changes" | "side">("changes");
 
-  const calculateDiff = () => {
-    setError(null);
-    try {
-      const left = JSON.parse(leftJson);
-      const right = JSON.parse(rightJson);
-      
-      const diff = jsonDiff.diffString(left, right, { color: false });
-      setDiffResult(diff || "JSON objects are identical.");
-    } catch (e: any) {
-      setError("Invalid JSON input. Please ensure both inputs are valid JSON.");
-      setDiffResult("");
-    }
-  };
+  const result = useMemo((): null | { error: string } | { changes: Change[]; rows: DiffRow[] } => {
+    if (!left.trim() || !right.trim()) return null;
+    let a: unknown, b: unknown;
+    try { a = JSON.parse(left); } catch (e) { return { error: `Left: ${(e as Error).message}` }; }
+    try { b = JSON.parse(right); } catch (e) { return { error: `Right: ${(e as Error).message}` }; }
+    const changes = diff(a, b, "$", unordered, []);
+    const sortStr = (v: unknown) => JSON.stringify(JSON.parse(canon(v)), null, 2);
+    return { changes, rows: diffLines(sortStr(a), sortStr(b)) };
+  }, [left, right, unordered]);
 
-  const copyToClipboard = () => {
-    if (!diffResult) return;
-    navigator.clipboard.writeText(diffResult);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const counts = result && "changes" in result ? { added: result.changes.filter((c) => c.kind === "added").length, removed: result.changes.filter((c) => c.kind === "removed").length, changed: result.changes.filter((c) => c.kind === "changed").length } : null;
+  const report = result && "changes" in result ? result.changes.map((c) => (c.kind === "changed" ? `~ ${c.path}: ${JSON.stringify(c.from)} → ${JSON.stringify(c.to)}` : `${c.kind === "added" ? "+" : "-"} ${c.path}: ${JSON.stringify(c.kind === "added" ? c.to : c.from)}`)).join("\n") : "";
 
-  const clear = () => {
-    setLeftJson("");
-    setRightJson("");
-    setDiffResult("");
-    setError(null);
-  };
+  const editor = (label: string, value: string, set: (v: string) => void) => (
+    <ToolPanel title={label} actions={<ClearButton onClick={() => set("")} iconOnly disabled={!value} />}>
+      <CodeArea value={value} onChange={(e) => set(e.target.value)} minHeight={240} placeholder={`Paste ${label.toLowerCase()} JSON…`} />
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="json-diff">
+      <div className="space-y-3">
+        <SplitLayout>
+          {editor("Original", left, setLeft)}
+          {editor("Modified", right, setRight)}
+        </SplitLayout>
+        <ToolPanel bodyClassName="p-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+          <Segmented size="sm" value={view} onChange={setView} options={[{ value: "changes", label: "Changes by path" }, { value: "side", label: "Side by side" }]} />
+          <Toggle label="Ignore array order" checked={unordered} onChange={setUnordered} />
+          <span className="text-[11px] text-muted-foreground">Key order is always ignored.</span>
+          <span className="flex-1" />
+          <Button variant="ghost" size="sm" onClick={() => { setLeft(right); setRight(left); }}><ArrowLeftRight /> Swap</Button>
+          {!left && !right && <Button variant="outline" size="sm" onClick={() => { setLeft(A); setRight(B); }}>Load example</Button>}
+        </ToolPanel>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
-        {/* Input Side */}
-        <div className="space-y-6 flex flex-col h-full">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col min-h-[400px]">
-              <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Original JSON</span>
-                <FileCode className="w-4 h-4 text-muted-foreground/40" />
-              </div>
-              <CardContent className="p-0 flex-1 relative">
-                <Textarea
-                  placeholder="Paste original JSON..."
-                  value={leftJson}
-                  onChange={(e) => setLeftJson(e.target.value)}
-                  className="w-full h-full min-h-[300px] p-8 bg-transparent border-none focus-visible:ring-0 resize-none font-mono text-xs leading-relaxed"
-                />
-              </CardContent>
-            </Card>
-
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col min-h-[400px]">
-              <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Modified JSON</span>
-                <FileCode className="w-4 h-4 text-primary/40" />
-              </div>
-              <CardContent className="p-0 flex-1 relative">
-                <Textarea
-                  placeholder="Paste modified JSON..."
-                  value={rightJson}
-                  onChange={(e) => setRightJson(e.target.value)}
-                  className="w-full h-full min-h-[300px] p-8 bg-transparent border-none focus-visible:ring-0 resize-none font-mono text-xs leading-relaxed"
-                />
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="flex gap-4 shrink-0">
-            <Button 
-              onClick={calculateDiff}
-              className="flex-1 h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-            >
-              <Split className="w-5 h-5 mr-2" />
-              Compare JSON
-            </Button>
-            <Button 
-              variant="outline" 
-              size="icon" 
-              onClick={clear}
-              className="w-14 h-14 rounded-2xl border-border/40 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/20 transition-all"
-            >
-              <Trash2 className="w-5 h-5" />
-            </Button>
-          </div>
-        </div>
-
-        {/* Result Side */}
-        <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col h-full min-h-[500px]">
-          <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <Zap className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-primary">Structural Diff</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={copyToClipboard}
-              disabled={!diffResult}
-              className={cn(
-                "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                copied && "text-green-500 hover:text-green-500"
-              )}
-            >
-              {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-              {copied ? "Copied" : "Copy Diff"}
-            </Button>
-          </div>
-          <CardContent className="p-0 flex-1 relative bg-primary/[0.01]">
-            {error ? (
-              <div className="p-8 h-full bg-destructive/5 text-destructive font-mono text-sm space-y-4">
-                <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-[10px]">
-                  <AlertCircle className="w-3 h-3" />
-                  JSON Parse Error
-                </div>
-                <div className="bg-destructive/10 p-4 rounded-xl border border-destructive/20 whitespace-pre-wrap leading-relaxed">
-                  {error}
-                </div>
-              </div>
+        {result && "error" in result && <ToolAlert tone="error">{result.error}</ToolAlert>}
+        {result && "changes" in result && counts && (
+          <ToolPanel
+            title={result.changes.length ? `${result.changes.length} difference${result.changes.length === 1 ? "" : "s"}` : "Identical"}
+            actions={
+              result.changes.length ? (
+                <>
+                  <StatusBadge tone="success">+{counts.added}</StatusBadge>
+                  <StatusBadge tone="error">−{counts.removed}</StatusBadge>
+                  <StatusBadge tone="warning">~{counts.changed}</StatusBadge>
+                  <CopyButton text={report} iconOnly />
+                </>
+              ) : (
+                <StatusBadge tone="success">Semantically equal</StatusBadge>
+              )
+            }
+          >
+            {view === "changes" ? (
+              <ul className="divide-y divide-border font-mono text-[12.5px] max-h-[560px] overflow-auto custom-scrollbar">
+                {result.changes.map((c, i) => (
+                  <li key={i} className={cn("flex items-start gap-3 px-3.5 py-2", c.kind === "added" && "bg-emerald-500/[0.07]", c.kind === "removed" && "bg-red-500/[0.07]", c.kind === "changed" && "bg-amber-500/[0.07]")}>
+                    <span className={cn("w-4 shrink-0 font-semibold", c.kind === "added" ? "text-emerald-600" : c.kind === "removed" ? "text-red-600" : "text-amber-600")}>{c.kind === "added" ? "+" : c.kind === "removed" ? "−" : "~"}</span>
+                    <span className="shrink-0 text-foreground">{c.path}</span>
+                    <span className="flex-1 min-w-0 break-all text-muted-foreground">
+                      {c.kind === "changed" ? (
+                        <>
+                          <span className="line-through decoration-red-500/60">{show(c.from)}</span> → <span className="text-foreground">{show(c.to)}</span>
+                        </>
+                      ) : (
+                        show(c.kind === "added" ? c.to : c.from)
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             ) : (
-              <pre className="w-full h-full min-h-[400px] p-8 font-mono text-[10px] leading-relaxed overflow-auto whitespace-pre">
-                {diffResult ? (
-                  diffResult.split('\n').map((line, i) => {
-                    const isAdded = line.startsWith('+') || line.includes(': "++');
-                    const isRemoved = line.startsWith('-') || line.includes(': "--');
-                    return (
-                      <div 
-                        key={i} 
-                        className={cn(
-                          "px-2 rounded-sm",
-                          isAdded && "bg-green-500/10 text-green-600 font-bold",
-                          isRemoved && "bg-destructive/10 text-destructive font-bold",
-                          !isAdded && !isRemoved && "text-muted-foreground opacity-70"
-                        )}
-                      >
-                        {line}
-                      </div>
-                    );
-                  })
-                ) : (
-                  <span className="text-muted-foreground italic opacity-50">Differences will be highlighted here...</span>
-                )}
-              </pre>
+              <div className="grid grid-cols-2 divide-x divide-border font-mono text-[12.5px] max-h-[560px] overflow-auto custom-scrollbar">
+                {(["left", "right"] as const).map((side) => (
+                  <div key={side}>
+                    {result.rows.map((r, i) => {
+                      const text = side === "left" ? r.left : r.right;
+                      const hit = (side === "left" && (r.type === "remove" || r.type === "change")) || (side === "right" && (r.type === "add" || r.type === "change"));
+                      return (
+                        <div key={i} className={cn("px-3 min-h-6 leading-6 whitespace-pre-wrap break-all", hit && (side === "left" ? "bg-red-500/10" : "bg-emerald-500/10"), text === undefined && "bg-muted/40")}>
+                          {text ?? ""}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
             )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-3">
-          <div className="flex items-center gap-2">
-            <Search className="w-4 h-4 text-primary" />
-            <h3 className="font-bold text-xs uppercase tracking-wider text-primary">How to read</h3>
-          </div>
-          <div className="space-y-2 text-[11px] text-muted-foreground leading-relaxed">
-            <p><span className="text-green-600 font-bold mr-2">+</span> Lines or keys added in the modified version.</p>
-            <p><span className="text-destructive font-bold mr-2">-</span> Lines or keys removed from the original version.</p>
-            <p><span className="font-bold mr-2">~</span> Values that have been changed.</p>
-          </div>
-        </div>
-        <div className="p-6 rounded-3xl bg-muted/30 border border-border/40 flex items-center gap-6">
-          <div className="w-16 h-16 rounded-2xl bg-background flex items-center justify-center text-muted-foreground/30 shadow-inner">
-            <ArrowRight className="w-8 h-8" />
-          </div>
-          <div className="space-y-1">
-            <h3 className="font-bold text-sm">Semantic Comparison</h3>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Unlike standard text diffs, JSON Diff understands the structure of objects. It ignores key ordering and focuses on the actual data hierarchy and values.
-            </p>
-          </div>
-        </div>
+          </ToolPanel>
+        )}
       </div>
     </ToolLayout>
   );
