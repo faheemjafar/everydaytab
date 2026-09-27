@@ -1,132 +1,49 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { ToolLayout } from "@/components/tool-layout";
+import { Input } from "@/components/ui/input";
+import { Field, JsonCodegen, Toggle, parseJsonInput } from "@/components/tool";
+import { inferRoot, toJsonSchema } from "@/lib/json-types";
 
-import { useState, useMemo } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  FileJson, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  AlertCircle,
-  FileCode,
-  Braces,
-  Settings2,
-  Code2,
-  Database
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import generateSchema from "generate-json-schema";
+const SAMPLE = `[
+  { "id": "7f1c8a2e-1b2c-4d3e-8f9a-0b1c2d3e4f5a", "email": "ada@example.com", "age": 36, "website": "https://ada.dev", "joined": "2024-03-01" },
+  { "id": "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d", "email": "alan@example.com", "age": null, "nickname": "AT" }
+]`;
 
 export default function JSONSchemaGenerator() {
-  const [input, setInput] = useState('{\n  "id": 1,\n  "name": "EverydayTab User",\n  "active": true,\n  "tags": ["developer", "utility"],\n  "profile": {\n    "bio": "Coding is life",\n    "followers": 1500\n  }\n}');
-  const [output, setOutput] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [input, setInput] = useState("");
+  const [title, setTitle] = useState("Root");
+  const [additional, setAdditional] = useState(false);
+  const [formats, setFormats] = useState(true);
 
-  useMemo(() => {
-    setError(null);
-    if (!input.trim()) {
-      setOutput("");
-      return;
-    }
-    try {
-      const parsed = JSON.parse(input);
-      const schema = generateSchema(parsed);
-      setOutput(JSON.stringify(schema, null, 2));
-    } catch (e: any) {
-      setError(e.message);
-      setOutput("");
-    }
-  }, [input]);
-
-  const copyToClipboard = () => {
-    if (!output) return;
-    navigator.clipboard.writeText(output);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const { output, error } = useMemo(() => {
+    const p = parseJsonInput(input);
+    if (p.error || p.value === undefined) return { output: "", error: p.error };
+    return { output: JSON.stringify(toJsonSchema(inferRoot(p.value, title || "Root"), { title, additional, formats }), null, 2), error: null };
+  }, [input, title, additional, formats]);
 
   return (
     <ToolLayout toolId="json-schema">
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch h-[calc(100vh-300px)] min-h-[500px]">
-        {/* Input Panel */}
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col">
-          <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <FileJson className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Source JSON</span>
-            </div>
-            <Button variant="ghost" size="icon" onClick={() => setInput("")} className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive">
-              <Trash2 className="w-4 h-4" />
-            </Button>
-          </div>
-          <CardContent className="p-0 flex-1 relative">
-            <Textarea
-              placeholder="Paste JSON here..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              className="w-full h-full p-8 bg-transparent border-none focus-visible:ring-0 resize-none font-mono text-xs leading-relaxed"
-            />
-          </CardContent>
-        </Card>
-
-        {/* Output Panel */}
-        <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col relative">
-          <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <Zap className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-primary">Generated Schema</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={copyToClipboard}
-              disabled={!output}
-              className={cn(
-                "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                copied && "text-green-500 hover:text-green-500"
-              )}
-            >
-              {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-              {copied ? "Copied" : "Copy Schema"}
-            </Button>
-          </div>
-          
-          <CardContent className="p-0 flex-1 relative bg-primary/[0.01]">
-            {error ? (
-              <div className="p-8 h-full bg-destructive/5 text-destructive font-mono text-sm space-y-4">
-                <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-[10px]">
-                  <AlertCircle className="w-3 h-3" />
-                  Format Error
-                </div>
-                <div className="bg-destructive/10 p-4 rounded-xl border border-destructive/20 whitespace-pre-wrap leading-relaxed">
-                  {error}
-                </div>
-              </div>
-            ) : (
-              <pre className="w-full h-full p-8 font-mono text-[10px] leading-relaxed overflow-auto whitespace-pre text-foreground/80 selection:bg-primary/20">
-                {output || <span className="text-muted-foreground italic opacity-50">Schema code will appear here...</span>}
-              </pre>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-        <div className="flex items-center gap-2">
-          <Settings2 className="w-4 h-4 text-primary" />
-          <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Usage Note</h3>
-        </div>
-        <p className="text-[11px] text-muted-foreground leading-relaxed">
-          JSON Schema is a vocabulary that allows you to annotate and validate JSON documents. It provides a way to describe your data's format and ensures consistency across APIs and services.
-        </p>
-      </div>
+      <JsonCodegen
+        input={input}
+        onInput={setInput}
+        output={output}
+        error={error}
+        sample={SAMPLE}
+        outputLabel="JSON Schema (2020-12)"
+        filename="schema.json"
+        options={
+          <>
+            <Field label="Title" htmlFor="st">
+              <Input id="st" value={title} onChange={(e) => setTitle(e.target.value)} className="w-36" />
+            </Field>
+            <Toggle label="Detect formats (email, uri, uuid, date-time)" checked={formats} onChange={setFormats} />
+            <Toggle label="Allow additional properties" checked={additional} onChange={setAdditional} />
+            <p className="text-[11px] text-muted-foreground">Fields missing from some samples are left out of “required”.</p>
+          </>
+        }
+      />
     </ToolLayout>
   );
 }

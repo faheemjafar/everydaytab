@@ -1,152 +1,60 @@
 "use client";
 
+import { useMemo, useState } from "react";
+import formatXml from "xml-formatter";
+import { XMLValidator } from "fast-xml-parser";
 import { ToolLayout } from "@/components/tool-layout";
+import { Field, Segmented, StatusBadge, TextTransform, Toggle } from "@/components/tool";
 
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  Code, 
-  Copy, 
-  Check, 
-  Trash2,
-  Settings2,
-  FileCode,
-  Zap,
-  AlignLeft,
-  Braces
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import format from "xml-formatter";
+const SAMPLE = `<?xml version="1.0" encoding="UTF-8"?><note priority="high"><to>Tove</to><from>Jani</from><heading>Reminder</heading><body>Don't forget me this weekend!<!-- a comment --></body><tags><tag>personal</tag><tag>weekend</tag></tags></note>`;
 
 export default function XMLFormatter() {
   const [input, setInput] = useState("");
-  const [output, setOutput] = useState("");
-  const [indent, setIndent] = useState("2");
-  const [copied, setCopied] = useState(false);
+  const [mode, setMode] = useState<"pretty" | "minify">("pretty");
+  const [indent, setIndent] = useState<"2" | "4" | "tab">("2");
+  const [collapse, setCollapse] = useState(true);
+  const [comments, setComments] = useState(true);
 
-  const process = (val: string, spaces: string) => {
-    setInput(val);
-    if (!val.trim()) {
-      setOutput("");
-      return;
-    }
-
+  const { output, error } = useMemo(() => {
+    if (!input.trim()) return { output: "", error: null };
+    const v = XMLValidator.validate(input, { allowBooleanAttributes: true });
+    if (v !== true) return { output: "", error: `Line ${v.err.line}, column ${v.err.col}: ${v.err.msg}` };
     try {
-      const formatted = format(val, {
-        indentation: " ".repeat(parseInt(spaces)),
-        collapseContent: true,
-      });
-      setOutput(formatted);
+      const src = comments ? input : input.replace(/<!--[\s\S]*?-->/g, "");
+      if (mode === "minify") return { output: src.replace(/>\s+</g, "><").trim(), error: null };
+      return { output: formatXml(src, { indentation: indent === "tab" ? "\t" : " ".repeat(Number(indent)), collapseContent: collapse, lineSeparator: "\n" }), error: null };
     } catch (e) {
-      setOutput("Error formatting XML. Please check your syntax.");
+      return { output: "", error: (e as Error).message };
     }
-  };
-
-  const copyToClipboard = () => {
-    if (!output) return;
-    navigator.clipboard.writeText(output);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const clear = () => {
-    setInput("");
-    setOutput("");
-  };
+  }, [input, mode, indent, collapse, comments]);
 
   return (
     <ToolLayout toolId="xml-formatter">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Column: Input and Settings */}
-        <div className="lg:col-span-5 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Settings2 className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Indentation</span>
-              </div>
-              <select 
-                value={indent} 
-                onChange={(e) => {
-                  setIndent(e.target.value);
-                  process(input, e.target.value);
-                }}
-                className="bg-transparent text-xs font-bold uppercase tracking-wider focus:outline-none cursor-pointer text-primary"
-              >
-                <option value="2">2 Spaces</option>
-                <option value="4">4 Spaces</option>
-                <option value="8">8 Spaces</option>
-              </select>
-            </div>
-            <CardContent className="p-0">
-              <Textarea
-                placeholder="Paste your raw XML here..."
-                value={input}
-                onChange={(e) => process(e.target.value, indent)}
-                className="w-full h-[400px] p-8 bg-transparent border-none focus-visible:ring-0 resize-none font-mono text-sm leading-relaxed"
-              />
-              <div className="p-4 bg-muted/20 border-t border-border/40 flex justify-end">
-                <Button variant="ghost" size="sm" onClick={clear} className="rounded-xl font-bold h-10 px-4">
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Clear Input
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Pro Tip</h3>
-            </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              This tool automatically collapses whitespace and preserves comments while applying your chosen indentation level.
-            </p>
-          </div>
-        </div>
-
-        {/* Right Column: Formatted Output */}
-        <div className="lg:col-span-7 h-full">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col h-full min-h-[550px]">
-            <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <AlignLeft className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-primary">Beautified XML</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={copyToClipboard}
-                disabled={!output}
-                className={cn(
-                  "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                  copied && "text-green-500 hover:text-green-500"
-                )}
-              >
-                {copied ? (
-                  <>
-                    <Check className="w-4 h-4 mr-2" />
-                    Copied
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-4 h-4 mr-2" />
-                    Copy Result
-                  </>
-                )}
-              </Button>
-            </div>
-            <CardContent className="p-0 flex-1 overflow-auto bg-primary/[0.01]">
-              <div className="p-8 font-mono text-xs leading-loose whitespace-pre tabular-nums">
-                {output || <span className="text-muted-foreground italic">Formatted XML will appear here...</span>}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      <TextTransform
+        input={input}
+        onInput={setInput}
+        output={output}
+        error={error}
+        sample={SAMPLE}
+        inputLabel="XML"
+        outputLabel={mode === "pretty" ? "Formatted" : "Minified"}
+        filename="formatted.xml"
+        options={
+          <>
+            {input.trim() && <StatusBadge tone={error ? "error" : "success"}>{error ? "Invalid XML" : "Well-formed"}</StatusBadge>}
+            <Segmented value={mode} onChange={setMode} options={[{ value: "pretty", label: "Beautify" }, { value: "minify", label: "Minify" }]} />
+            {mode === "pretty" && (
+              <>
+                <Field label="Indent">
+                  <Segmented size="sm" value={indent} onChange={setIndent} options={[{ value: "2", label: "2" }, { value: "4", label: "4" }, { value: "tab", label: "Tab" }]} />
+                </Field>
+                <Toggle label="Keep short text inline" checked={collapse} onChange={setCollapse} />
+              </>
+            )}
+            <Toggle label="Keep comments" checked={comments} onChange={setComments} />
+          </>
+        }
+      />
     </ToolLayout>
   );
 }

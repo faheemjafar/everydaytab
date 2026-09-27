@@ -39,7 +39,8 @@ function toText(html: string, o: { breaks: boolean; links: Links; bullets: boole
     el.childNodes.forEach(walk);
     if (href && o.links === "markdown") out += `](${href})`;
     else if (href && o.links === "text-url" && href !== el.textContent) out += ` (${href})`;
-    if (block) out += "\n";
+    // List items only need a break before them; others get one on both sides.
+    if (block && el.tagName !== "LI") out += "\n";
   };
   walk(doc.body);
   if (o.collapse) out = out.replace(/[ \t\u00a0]+/g, " ").replace(/ *\n */g, "\n");

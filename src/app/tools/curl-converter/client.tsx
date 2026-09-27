@@ -1,177 +1,72 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { ToolLayout } from "@/components/tool-layout";
+import { ClearButton, CodeArea, CodeOutput, StatusBadge, ToolAlert, ToolPanel } from "@/components/tool";
+import { parseCurl, toAxios, toFetch, toGo, toPhp, toPython, type CurlRequest } from "@/lib/curl";
 
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  Terminal, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  AlertCircle,
-  FileCode,
-  Settings2,
-  Code
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+type Result = null | { error: string } | { r: CurlRequest; tabs: { id: string; label: string; code: string }[] };
+
+const SAMPLES: [string, string][] = [
+  ["JSON POST", `curl 'https://api.example.com/v1/users' \\\n  -H 'Authorization: Bearer <token>' \\\n  -H 'Content-Type: application/json' \\\n  --data-raw '{"name":"Ada","role":"admin"}'`],
+  ["Basic auth + query", `curl -u user:password -G https://api.example.com/search -d q=hello -d limit=10`],
+  ["File upload", `curl -X POST https://api.example.com/upload -F "file=@report.pdf" -F "title=Q3 report"`],
+];
+
 export default function CurlConverter() {
-  const [input, setInput] = useState("curl 'https://api.example.com/v1/users' \\\n  -H 'Authorization: Bearer secret_token' \\\n  -H 'Content-Type: application/json' \\\n  --data-raw '{\"name\":\"Faheem\"}'");
-  const [output, setOutput] = useState("");
-  const [target, setTarget] = useState<"javascript" | "python">("javascript");
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [input, setInput] = useState(SAMPLES[0][1]);
 
-  const convert = (val: string, lang: string) => {
-    setInput(val);
-    setError(null);
-    if (!val.trim()) {
-      setOutput("");
-      return;
-    }
-
+  const result = useMemo((): Result => {
+    if (!input.trim()) return null;
     try {
-      // Basic manual parser for common curl patterns
-      const urlMatch = val.match(/curl\s+['"]?(https?:\/\/.*?)['" \s]/);
-      const url = urlMatch ? urlMatch[1] : "https://api.example.com";
-      
-      const methodMatch = val.match(/-X\s+(\w+)/);
-      const method = methodMatch ? methodMatch[1] : (val.includes('--data') || val.includes('-d') ? 'POST' : 'GET');
-
-      const headers: Record<string, string> = {};
-      const headerMatches = val.matchAll(/-H\s+['"](.*?): (.*?)['"]/g);
-      for (const m of headerMatches) {
-        headers[m[1]] = m[2];
-      }
-
-      const dataMatch = val.match(/--data(-raw)?\s+['"](\{.*?\})['"]/s);
-      const data = dataMatch ? dataMatch[2] : null;
-
-      if (lang === "javascript") {
-        let code = `fetch("${url}", {\n`;
-        code += `  method: "${method}",\n`;
-        if (Object.keys(headers).length > 0) {
-          code += `  headers: {\n`;
-          Object.entries(headers).forEach(([k, v]) => {
-            code += `    "${k}": "${v}",\n`;
-          });
-          code += `  },\n`;
-        }
-        if (data) {
-          code += `  body: JSON.stringify(${data})\n`;
-        }
-        code += `});`;
-        setOutput(code);
-      } else {
-        let code = `import requests\n\n`;
-        code += `url = "${url}"\n`;
-        if (Object.keys(headers).length > 0) {
-          code += `headers = {\n`;
-          Object.entries(headers).forEach(([k, v]) => {
-            code += `    "${k}": "${v}",\n`;
-          });
-          code += `}\n`;
-        }
-        if (data) {
-          code += `data = ${data}\n`;
-          code += `response = requests.${method.toLowerCase()}(url, headers=headers, json=data)\n`;
-        } else {
-          code += `response = requests.${method.toLowerCase()}(url, headers=headers)\n`;
-        }
-        code += `print(response.json())`;
-        setOutput(code);
-      }
-    } catch (e: any) {
-      setError("Simplified parser failed. Please use a standard curl command.");
-      setOutput("");
+      const r = parseCurl(input);
+      return { r, tabs: [
+        { id: "fetch", label: "JavaScript (fetch)", code: toFetch(r) },
+        { id: "axios", label: "Node (axios)", code: toAxios(r) },
+        { id: "python", label: "Python (requests)", code: toPython(r) },
+        { id: "go", label: "Go", code: toGo(r) },
+        { id: "php", label: "PHP", code: toPhp(r) },
+      ] };
+    } catch (e) {
+      return { error: (e as Error).message };
     }
-  };
-
-  const copyToClipboard = () => {
-    if (!output) return;
-    navigator.clipboard.writeText(output);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  }, [input]);
 
   return (
     <ToolLayout toolId="curl-converter">
+      <div className="space-y-3">
+        <ToolPanel
+          title="curl command"
+          actions={
+            <>
+              {SAMPLES.map(([label, cmd]) => (
+                <button key={label} type="button" onClick={() => setInput(cmd)} className="h-7 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted">
+                  {label}
+                </button>
+              ))}
+              <ClearButton onClick={() => setInput("")} iconOnly disabled={!input} />
+            </>
+          }
+          footer={<span className="text-[11px] text-muted-foreground">Tip: in Chrome/Firefox DevTools → Network, right-click a request → Copy → Copy as cURL (bash).</span>}
+        >
+          <CodeArea value={input} onChange={(e) => setInput(e.target.value)} minHeight={150} placeholder="curl https://…" />
+        </ToolPanel>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch h-[calc(100vh-300px)] min-h-[500px]">
-        {/* Input Panel */}
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col">
-          <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <Terminal className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Curl Command</span>
+        {result && "error" in result && <ToolAlert tone="error">{result.error}</ToolAlert>}
+        {result && "r" in result && (
+          <>
+            <div className="flex flex-wrap gap-1.5">
+              <StatusBadge tone="info">{result.r.method}</StatusBadge>
+              <StatusBadge>{result.r.url.length > 60 ? `${result.r.url.slice(0, 60)}…` : result.r.url}</StatusBadge>
+              {result.r.headers.length > 0 && <StatusBadge>{result.r.headers.length} headers</StatusBadge>}
+              {result.r.body && <StatusBadge>{result.r.bodyKind} body</StatusBadge>}
+              {result.r.form && <StatusBadge>multipart form</StatusBadge>}
+              {result.r.auth && <StatusBadge>basic auth</StatusBadge>}
             </div>
-            <Button variant="ghost" size="icon" onClick={() => convert("", target)} className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive">
-              <Trash2 className="w-4 h-4" />
-            </Button>
-          </div>
-          <CardContent className="p-0 flex-1 relative">
-            <Textarea
-              placeholder="Paste curl command here..."
-              value={input}
-              onChange={(e) => convert(e.target.value, target)}
-              className="w-full h-full p-8 bg-transparent border-none focus-visible:ring-0 resize-none font-mono text-xs leading-relaxed"
-            />
-          </CardContent>
-        </Card>
-
-        {/* Output Panel */}
-        <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col relative">
-          <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <Settings2 className="w-4 h-4 text-primary" />
-              <select 
-                value={target}
-                onChange={(e) => {
-                  setTarget(e.target.value as any);
-                  convert(input, e.target.value);
-                }}
-                className="bg-transparent text-xs font-bold uppercase tracking-widest text-primary focus:outline-none cursor-pointer"
-              >
-                <option value="javascript">JavaScript (Fetch)</option>
-                <option value="python">Python (Requests)</option>
-              </select>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={copyToClipboard}
-              disabled={!output}
-              className={cn(
-                "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                copied && "text-green-500 hover:text-green-500"
-              )}
-            >
-              {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-              {copied ? "Copied" : "Copy Code"}
-            </Button>
-          </div>
-          
-          <CardContent className="p-0 flex-1 relative bg-primary/[0.01]">
-            {error ? (
-              <div className="p-8 h-full bg-destructive/5 text-destructive font-mono text-sm space-y-4">
-                <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-[10px]">
-                  <AlertCircle className="w-3 h-3" />
-                  Convert Error
-                </div>
-                <div className="bg-destructive/10 p-4 rounded-xl border border-destructive/20 whitespace-pre-wrap leading-relaxed">
-                  {error}
-                </div>
-              </div>
-            ) : (
-              <pre className="w-full h-full min-h-[400px] p-8 font-mono text-xs leading-relaxed overflow-auto whitespace-pre selection:bg-primary/20 text-foreground/80">
-                {output || <span className="text-muted-foreground italic opacity-50">Converted code will appear here...</span>}
-              </pre>
-            )}
-          </CardContent>
-        </Card>
+            <CodeOutput title="Code" tabs={result.tabs} />
+            {result.r.warnings.length > 0 && <ToolAlert tone="warning">{result.r.warnings.join(" · ")}</ToolAlert>}
+          </>
+        )}
       </div>
     </ToolLayout>
   );

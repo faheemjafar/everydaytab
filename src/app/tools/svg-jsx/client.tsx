@@ -1,148 +1,119 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { ToolLayout } from "@/components/tool-layout";
+import { Input } from "@/components/ui/input";
+import { Field, Segmented, TextTransform, Toggle } from "@/components/tool";
 
-import { useState, useMemo } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  FileCode, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  Info,
-  RefreshCw,
-  Code2,
-  Settings2,
-  AlertCircle
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+const SAMPLE = `<?xml version="1.0" encoding="UTF-8"?>
+<!-- Generator: Figma -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24" height="24" viewBox="0 0 24 24" class="icon" style="fill: none; stroke-width: 2">
+  <defs><linearGradient id="g"><stop offset="0" stop-color="#14b8a6"/><stop offset="1" stop-color="#6366f1"/></linearGradient></defs>
+  <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="url(#g)" stroke-linecap="round" stroke-linejoin="round" fill-rule="evenodd"/>
+  <use xlink:href="#g"/>
+</svg>`;
+
+// Attributes React keeps as-is (already valid, or data-/aria-).
+const KEEP = /^(data-|aria-)/;
+const SPECIAL: Record<string, string> = { class: "className", "xlink:href": "xlinkHref", "xml:space": "xmlSpace", "xmlns:xlink": "xmlnsXlink", "xml:lang": "xmlLang", for: "htmlFor", tabindex: "tabIndex" };
+const camel = (a: string) => SPECIAL[a] ?? (KEEP.test(a) ? a : a.replace(/[:-](\w)/g, (_, c) => c.toUpperCase()));
+const styleObj = (css: string) =>
+  `{{ ${css
+    .split(";")
+    .map((d) => d.trim())
+    .filter(Boolean)
+    .map((d) => {
+      const [k, ...v] = d.split(":");
+      const val = v.join(":").trim();
+      return `${k.trim().replace(/-(\w)/g, (_, c) => c.toUpperCase())}: ${/^-?\d+(\.\d+)?$/.test(val) ? val : JSON.stringify(val)}`;
+    })
+    .join(", ")} }}`;
+
+type Opts = { name: string; ts: boolean; props: boolean; size: "keep" | "remove" | "1em"; current: boolean; memo: boolean; exportStyle: "named" | "default" };
+
+function convert(svg: string, o: Opts) {
+  const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+  const err = doc.querySelector("parsererror");
+  if (err) throw new Error(err.textContent?.split("\n")[0] || "Invalid SVG");
+  const root = doc.documentElement;
+  if (root.nodeName.toLowerCase() !== "svg") throw new Error("Root element must be <svg>.");
+  const render = (el: Element, depth: number): string => {
+    const pad = "  ".repeat(depth);
+    const attrs: string[] = [];
+    for (const a of Array.from(el.attributes)) {
+      if (el === root && (a.name === "xmlns:xlink" || a.name === "version" || a.name.startsWith("xmlns:") || (o.size !== "keep" && (a.name === "width" || a.name === "height")))) continue;
+      let v = a.value;
+      if (o.current && /^(fill|stroke)$/.test(a.name) && !/^(none|url\(|currentColor)/i.test(v)) v = "currentColor";
+      attrs.push(a.name === "style" ? `style=${styleObj(v)}` : `${camel(a.name)}=${JSON.stringify(v)}`);
+    }
+    if (el === root) {
+      if (o.size === "1em") attrs.push('width="1em"', 'height="1em"');
+      if (o.props) attrs.push("{...props}");
+    }
+    const kids = Array.from(el.childNodes)
+      .map((n) => (n.nodeType === 1 ? render(n as Element, depth + 1) : n.nodeType === 3 && n.textContent?.trim() ? `${pad}  {${JSON.stringify(n.textContent.trim())}}` : ""))
+      .filter(Boolean);
+    const multi = attrs.join(" ").length > 70;
+    const open = `${pad}<${el.nodeName}${attrs.length ? (multi ? `\n${attrs.map((a) => `${pad}  ${a}`).join("\n")}\n${pad}` : ` ${attrs.join(" ")}`) : ""}`;
+    return kids.length ? `${open}>\n${kids.join("\n")}\n${pad}</${el.nodeName}>` : `${open}${multi ? "" : " "}/>`;
+  };
+  const jsx = render(root, 1);
+  const sig = o.props ? (o.ts ? "(props: SVGProps<SVGSVGElement>)" : "(props)") : "()";
+  const imp = o.ts && o.props ? `import type { SVGProps } from "react";\n${o.memo ? 'import { memo } from "react";\n' : ""}\n` : o.memo ? 'import { memo } from "react";\n\n' : "";
+  const body = `const ${o.name} = ${sig} => (\n${jsx}\n);`;
+  const exp = o.exportStyle === "default" ? `\n\nexport default ${o.memo ? `memo(${o.name})` : o.name};` : "";
+  return `${imp}${o.exportStyle === "named" ? "export " : ""}${o.memo && o.exportStyle === "named" ? body.replace(`const ${o.name} = `, `const ${o.name} = memo(`).replace(/\);$/, "));") : body}${exp}`;
+}
 
 export default function SVGToJSX() {
-  const [input, setInput] = useState('<svg width="100" height="100" viewBox="0 0 100 100">\n  <circle cx="50" cy="50" r="40" stroke="black" stroke-width="3" fill="red" />\n</svg>');
-  const [output, setOutput] = useState("");
-  const [componentName, setInterfaceName] = useState("Icon");
-  const [copied, setCopied] = useState(false);
+  const [input, setInput] = useState("");
+  const [name, setName] = useState("Icon");
+  const [ts, setTs] = useState(true);
+  const [props, setProps] = useState(true);
+  const [size, setSize] = useState<Opts["size"]>("keep");
+  const [current, setCurrent] = useState(false);
+  const [memo, setMemo] = useState(false);
+  const [exportStyle, setExportStyle] = useState<Opts["exportStyle"]>("named");
 
-  const convertToJSX = (svg: string, name: string) => {
-    if (!svg.trim()) return "";
-    
-    let result = svg
-      .replace(/class=/g, 'className=')
-      .replace(/for=/g, 'htmlFor=')
-      .replace(/xlink:href=/g, 'xlinkHref=')
-      .replace(/stroke-width=/g, 'strokeWidth=')
-      .replace(/stroke-linecap=/g, 'strokeLinecap=')
-      .replace(/stroke-linejoin=/g, 'strokeLinejoin=')
-      .replace(/stroke-miterlimit=/g, 'strokeMiterlimit=')
-      .replace(/stroke-dasharray=/g, 'strokeDasharray=')
-      .replace(/stroke-dashoffset=/g, 'strokeDashoffset=')
-      .replace(/stroke-opacity=/g, 'strokeOpacity=')
-      .replace(/fill-opacity=/g, 'fillOpacity=')
-      .replace(/fill-rule=/g, 'fillRule=')
-      .replace(/clip-rule=/g, 'clipRule=')
-      .replace(/stop-color=/g, 'stopColor=')
-      .replace(/stop-opacity=/g, 'stopOpacity=')
-      .replace(/font-family=/g, 'fontFamily=')
-      .replace(/font-size=/g, 'fontSize=')
-      .replace(/font-weight=/g, 'fontWeight=')
-      .replace(/text-anchor=/g, 'textAnchor=')
-      .replace(/dominant-baseline=/g, 'dominantBaseline=')
-      .replace(/clip-path=/g, 'clipPath=')
-      .replace(/gradient-units=/g, 'gradientUnits=')
-      .replace(/gradient-transform=/g, 'gradientTransform=');
-
-    return `export const ${name} = (props: React.SVGProps<SVGSVGElement>) => (\n  ${result.trim().split('\n').join('\n  ')}\n);`;
-  };
-
-  useMemo(() => {
-    setOutput(convertToJSX(input, componentName || "Icon"));
-  }, [input, componentName]);
-
-  const copyToClipboard = () => {
-    if (!output) return;
-    navigator.clipboard.writeText(output);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const { output, error } = useMemo(() => {
+    if (!input.trim() || typeof DOMParser === "undefined") return { output: "", error: null };
+    try {
+      const comp = (name.replace(/[^\w]/g, "") || "Icon").replace(/^[a-z]/, (c) => c.toUpperCase());
+      return { output: convert(input.replace(/<\?xml[^>]*>|<!--[\s\S]*?-->|<!DOCTYPE[^>]*>/g, "").trim(), { name: comp, ts, props, size, current, memo, exportStyle }), error: null };
+    } catch (e) {
+      return { output: "", error: (e as Error).message };
+    }
+  }, [input, name, ts, props, size, current, memo, exportStyle]);
 
   return (
     <ToolLayout toolId="svg-jsx">
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch h-[calc(100vh-300px)] min-h-[500px]">
-        {/* Editor Side */}
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col">
-          <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <Code2 className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Source SVG</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <input 
-                value={componentName}
-                onChange={(e) => setInterfaceName(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
-                placeholder="Component Name"
-                className="bg-background/50 border border-border/40 rounded-lg px-3 py-1 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-primary/20 w-32"
-              />
-              <Button variant="ghost" size="icon" onClick={() => setInput("")} className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive">
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-          <CardContent className="p-0 flex-1 relative">
-            <Textarea
-              placeholder="Paste <svg> code here..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              className="w-full h-full p-8 bg-transparent border-none focus-visible:ring-0 resize-none font-mono text-xs leading-relaxed"
-            />
-          </CardContent>
-        </Card>
-
-        {/* Output Side */}
-        <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col relative">
-          <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <Zap className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-primary">JSX Component</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={copyToClipboard}
-              disabled={!output}
-              className={cn(
-                "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                copied && "text-green-500 hover:text-green-500"
-              )}
-            >
-              {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-              {copied ? "Copied" : "Copy Code"}
-            </Button>
-          </div>
-          
-          <CardContent className="p-0 flex-1 relative bg-primary/[0.01]">
-            <pre className="w-full h-full p-8 font-mono text-xs leading-relaxed overflow-auto whitespace-pre text-foreground/80 selection:bg-primary/20">
-              {output || <span className="text-muted-foreground italic opacity-50">JSX code will appear here...</span>}
-            </pre>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-        <div className="flex items-center gap-2">
-          <Settings2 className="w-4 h-4 text-primary" />
-          <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Rules Applied</h3>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-[11px] text-muted-foreground">
-          <div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary/40" /> kebab-case to camelCase</div>
-          <div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary/40" /> Typed React components</div>
-          <div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary/40" /> Reserved keyword escaping</div>
-          <div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-primary/40" /> Functional components</div>
-        </div>
-      </div>
+      <TextTransform
+        input={input}
+        onInput={setInput}
+        output={output}
+        error={error}
+        sample={SAMPLE}
+        inputLabel="SVG"
+        outputLabel={ts ? "React component (TSX)" : "React component (JSX)"}
+        filename={`${name || "Icon"}.${ts ? "tsx" : "jsx"}`}
+        options={
+          <>
+            <Field label="Component name" htmlFor="cn">
+              <Input id="cn" value={name} onChange={(e) => setName(e.target.value)} className="w-32 font-mono" />
+            </Field>
+            <Field label="Size">
+              <Segmented size="sm" value={size} onChange={setSize} options={[{ value: "keep", label: "Keep" }, { value: "1em", label: "1em (scales with text)" }, { value: "remove", label: "Remove" }]} />
+            </Field>
+            <Field label="Export">
+              <Segmented size="sm" value={exportStyle} onChange={setExportStyle} options={[{ value: "named", label: "Named" }, { value: "default", label: "Default" }]} />
+            </Field>
+            <Toggle label="TypeScript" checked={ts} onChange={setTs} />
+            <Toggle label="Spread props" checked={props} onChange={setProps} />
+            <Toggle label="Colours → currentColor" checked={current} onChange={setCurrent} />
+            <Toggle label="memo()" checked={memo} onChange={setMemo} />
+          </>
+        }
+      />
     </ToolLayout>
   );
 }

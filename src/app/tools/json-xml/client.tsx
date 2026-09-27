@@ -1,165 +1,77 @@
 "use client";
 
+import { useMemo, useState } from "react";
+import { XMLBuilder, XMLParser, XMLValidator } from "fast-xml-parser";
+import { ArrowLeftRight } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  Braces, 
-  Copy, 
-  Check, 
-  Trash2,
-  ArrowRightLeft,
-  FileJson,
-  FileCode,
-  Zap,
-  AlertCircle,
-  Code
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import convert from "xml-js";
+import { Input } from "@/components/ui/input";
+import { Field, Segmented, TextTransform, Toggle } from "@/components/tool";
+
+type Dir = "json-xml" | "xml-json";
+
+const SAMPLE_JSON = `{\n  "catalog": {\n    "@_version": "2",\n    "book": [\n      { "@_id": "bk101", "title": "XML Developer's Guide", "price": 44.95 },\n      { "@_id": "bk102", "title": "Midnight Rain", "price": 5.95 }\n    ]\n  }\n}`;
+const SAMPLE_XML = `<?xml version="1.0"?>\n<catalog version="2">\n  <book id="bk101">\n    <title>XML Developer's Guide</title>\n    <price>44.95</price>\n  </book>\n  <book id="bk102">\n    <title>Midnight Rain</title>\n    <price>5.95</price>\n  </book>\n</catalog>`;
 
 export default function JSONXMLConverter() {
+  const [dir, setDir] = useState<Dir>("xml-json");
   const [input, setInput] = useState("");
-  const [output, setOutput] = useState("");
-  const [mode, setMode] = useState<"json-to-xml" | "xml-to-json">("json-to-xml");
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [prefix, setPrefix] = useState("@_");
+  const [attrs, setAttrs] = useState(true);
+  const [typed, setTyped] = useState(true);
+  const [root, setRoot] = useState("root");
 
-  const process = (val: string, currentMode: "json-to-xml" | "xml-to-json") => {
-    setInput(val);
-    setError(null);
-    if (!val.trim()) {
-      setOutput("");
-      return;
-    }
-
+  const { output, error } = useMemo(() => {
+    if (!input.trim()) return { output: "", error: null };
     try {
-      if (currentMode === "json-to-xml") {
-        const json = val; // xml-js can take json string or object
-        const result = convert.json2xml(json, { compact: true, spaces: 2 });
-        setOutput(result);
-      } else {
-        const result = convert.xml2json(val, { compact: true, spaces: 2 });
-        setOutput(result);
+      const opts = { ignoreAttributes: !attrs, attributeNamePrefix: prefix, parseTagValue: typed, parseAttributeValue: typed, textNodeName: "#text" };
+      if (dir === "xml-json") {
+        const valid = XMLValidator.validate(input);
+        if (valid !== true) return { output: "", error: `Line ${valid.err.line}: ${valid.err.msg}` };
+        const obj = new XMLParser({ ...opts, ignoreDeclaration: true }).parse(input);
+        return { output: JSON.stringify(obj, null, 2), error: null };
       }
-    } catch (e: any) {
-      setError(e.message);
-      setOutput("");
+      let obj = JSON.parse(input);
+      // XML needs a single root element.
+      if (Array.isArray(obj) || typeof obj !== "object" || obj === null || Object.keys(obj).length !== 1) obj = { [root || "root"]: Array.isArray(obj) ? { item: obj } : obj };
+      const xml = new XMLBuilder({ ...opts, format: true, indentBy: "  ", suppressEmptyNode: true }).build(obj);
+      return { output: `<?xml version="1.0" encoding="UTF-8"?>\n${xml}`.trim(), error: null };
+    } catch (e) {
+      return { output: "", error: (e as Error).message };
     }
-  };
-
-  const toggleMode = () => {
-    const newMode = mode === "json-to-xml" ? "xml-to-json" : "json-to-xml";
-    setMode(newMode);
-    if (output) {
-      const oldOutput = output;
-      setInput(oldOutput);
-      process(oldOutput, newMode);
-    } else {
-      process(input, newMode);
-    }
-  };
-
-  const copyToClipboard = () => {
-    if (!output) return;
-    navigator.clipboard.writeText(output);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  }, [input, dir, prefix, attrs, typed, root]);
 
   return (
     <ToolLayout toolId="json-xml">
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
-        {/* Input Panel */}
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col min-h-[500px]">
-          <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              {mode === "json-to-xml" ? <FileJson className="w-4 h-4 text-primary" /> : <FileCode className="w-4 h-4 text-primary" />}
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                {mode === "json-to-xml" ? "JSON Input" : "XML Input"}
-              </span>
-            </div>
-            <Button variant="ghost" size="icon" onClick={() => process("", mode)} className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive">
-              <Trash2 className="w-4 h-4" />
+      <TextTransform
+        input={input}
+        onInput={setInput}
+        output={output}
+        error={error}
+        sample={dir === "json-xml" ? SAMPLE_JSON : SAMPLE_XML}
+        inputLabel={dir === "json-xml" ? "JSON" : "XML"}
+        outputLabel={dir === "json-xml" ? "XML" : "JSON"}
+        filename={dir === "json-xml" ? "converted.xml" : "converted.json"}
+        options={
+          <>
+            <Segmented value={dir} onChange={(d) => { setDir(d); setInput(output); }} options={[{ value: "xml-json", label: "XML → JSON" }, { value: "json-xml", label: "JSON → XML" }]} />
+            <Button variant="ghost" size="icon" onClick={() => { setDir(dir === "json-xml" ? "xml-json" : "json-xml"); setInput(output); }} aria-label="Swap" title="Swap">
+              <ArrowLeftRight />
             </Button>
-          </div>
-          <CardContent className="p-0 flex-1 relative">
-            <Textarea
-              placeholder={mode === "json-to-xml" ? '{\n  "note": {\n    "to": "Tove",\n    "from": "Jani",\n    "heading": "Reminder",\n    "body": "Don\'t forget me this weekend!"\n  }\n}' : '<note>\n  <to>Tove</to>\n  <from>Jani</from>\n  <heading>Reminder</heading>\n  <body>Don\'t forget me this weekend!</body>\n</note>'}
-              value={input}
-              onChange={(e) => process(e.target.value, mode)}
-              className="w-full h-full min-h-[400px] p-8 bg-transparent border-none focus-visible:ring-0 resize-none font-mono text-sm leading-relaxed"
-            />
-          </CardContent>
-        </Card>
-
-        {/* Output Panel */}
-        <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col min-h-[500px] relative">
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 hidden lg:block">
-            <Button 
-              variant="outline" 
-              size="icon" 
-              onClick={toggleMode}
-              className="w-12 h-12 rounded-full bg-background border-border/40 text-muted-foreground shadow-xl hover:text-primary hover:border-primary/20 transition-all hover:scale-110 active:scale-95"
-            >
-              <ArrowRightLeft className="w-5 h-5" />
-            </Button>
-          </div>
-
-          <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              {mode === "json-to-xml" ? <FileCode className="w-4 h-4 text-primary" /> : <FileJson className="w-4 h-4 text-primary" />}
-              <span className="text-xs font-bold uppercase tracking-widest text-primary">
-                {mode === "json-to-xml" ? "XML Result" : "JSON Result"}
-              </span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={copyToClipboard}
-              disabled={!output}
-              className={cn(
-                "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                copied && "text-green-500 hover:text-green-500"
-              )}
-            >
-              {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-              {copied ? "Copied" : "Copy Result"}
-            </Button>
-          </div>
-          <CardContent className="p-0 flex-1 relative">
-            {error ? (
-              <div className="p-8 h-full bg-destructive/5 text-destructive font-mono text-sm space-y-4">
-                <div className="flex items-center gap-2 font-bold uppercase tracking-wider text-[10px]">
-                  <AlertCircle className="w-3 h-3" />
-                  Format Error
-                </div>
-                <div className="bg-destructive/10 p-4 rounded-xl border border-destructive/20 whitespace-pre-wrap leading-relaxed">
-                  {error}
-                </div>
-              </div>
-            ) : (
-              <pre className="w-full h-full min-h-[400px] p-8 bg-primary/[0.02] font-mono text-sm leading-relaxed overflow-auto whitespace-pre">
-                {output || <span className="text-muted-foreground italic">Converted data will appear here...</span>}
-              </pre>
+            <Toggle label="Attributes" checked={attrs} onChange={setAttrs} />
+            {attrs && (
+              <Field label="Attribute prefix" htmlFor="ap">
+                <Input id="ap" value={prefix} onChange={(e) => setPrefix(e.target.value)} className="w-16 font-mono" />
+              </Field>
             )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-        <div className="flex items-center gap-2">
-          <Zap className="w-4 h-4 text-primary" />
-          <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Conversion Note</h3>
-        </div>
-        <p className="text-[11px] text-muted-foreground leading-relaxed">
-          This tool uses a <strong>compact</strong> mapping strategy. Attributes are prefixed with `_attributes`, and text nodes use `_text`. This ensures a predictable structure when converting bidirectionally.
-        </p>
-      </div>
+            {dir === "xml-json" ? <Toggle label="Numbers & booleans typed" checked={typed} onChange={setTyped} /> : (
+              <Field label="Root (if needed)" htmlFor="rt">
+                <Input id="rt" value={root} onChange={(e) => setRoot(e.target.value.replace(/[^\w.-]/g, ""))} className="w-24 font-mono" />
+              </Field>
+            )}
+          </>
+        }
+      />
     </ToolLayout>
   );
 }
