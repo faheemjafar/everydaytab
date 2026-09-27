@@ -172,7 +172,10 @@ export function SettingsClient() {
 
           {/* Behaviour */}
           <Section id="behaviour" title="Behaviour">
-            <Row label="Keep sidebar pinned" description="Show the tool list next to the icon rail on large screens.">
+            <Row label="Sidebar labels" description="Show category names next to their icons. Off = compact icon rail with tooltips.">
+              <Switch checked={settings.railLabels} onCheckedChange={(v) => update("railLabels", v)} />
+            </Row>
+            <Row label="Keep tool list pinned" description="Show the current category's tool list next to the sidebar on large screens.">
               <Switch checked={settings.sidebarPinned} onCheckedChange={(v) => update("sidebarPinned", v)} />
             </Row>
             <Row label="Open sidebar on hover" description="When unpinned, hovering a category icon opens its tool list. Off = click only.">

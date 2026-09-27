@@ -23,6 +23,7 @@ export interface Settings {
   fontSize: FontSize;
   reduceMotion: boolean;
   // Behaviour
+  railLabels: boolean;
   sidebarPinned: boolean;
   sidebarHoverOpen: boolean;
   openLastToolOnStart: boolean;
@@ -38,6 +39,7 @@ export const DEFAULT_SETTINGS: Settings = {
   density: "compact",
   fontSize: "md",
   reduceMotion: false,
+  railLabels: true,
   sidebarPinned: false,
   sidebarHoverOpen: true,
   openLastToolOnStart: false,
@@ -70,6 +72,7 @@ export function sanitizeSettings(input: unknown): Settings {
     density: pick(s.density, DENSITIES, DEFAULT_SETTINGS.density),
     fontSize: pick(s.fontSize, FONT_SIZES, DEFAULT_SETTINGS.fontSize),
     reduceMotion: bool(s.reduceMotion, DEFAULT_SETTINGS.reduceMotion),
+    railLabels: bool(s.railLabels, DEFAULT_SETTINGS.railLabels),
     sidebarPinned: bool(s.sidebarPinned, DEFAULT_SETTINGS.sidebarPinned),
     sidebarHoverOpen: bool(s.sidebarHoverOpen, DEFAULT_SETTINGS.sidebarHoverOpen),
     openLastToolOnStart: bool(s.openLastToolOnStart, DEFAULT_SETTINGS.openLastToolOnStart),
@@ -88,6 +91,7 @@ export function applySettingsToDocument(s: Settings) {
   el.dataset.density = s.density;
   el.dataset.fontSize = s.fontSize;
   el.dataset.reduceMotion = String(s.reduceMotion);
+  el.dataset.railLabels = String(s.railLabels);
 }
 
 /**
@@ -96,4 +100,4 @@ export function applySettingsToDocument(s: Settings) {
  */
 export const SETTINGS_BOOT_SCRIPT = `(function(){try{var s=JSON.parse(localStorage.getItem(${JSON.stringify(
   SETTINGS_KEY
-)})||"{}");var d=document.documentElement;d.dataset.accent=s.accent||"teal";d.dataset.density=s.density||"compact";d.dataset.fontSize=s.fontSize||"md";d.dataset.reduceMotion=String(!!s.reduceMotion);}catch(e){}})();`;
+)})||"{}");var d=document.documentElement;d.dataset.accent=s.accent||"teal";d.dataset.density=s.density||"compact";d.dataset.fontSize=s.fontSize||"md";d.dataset.reduceMotion=String(!!s.reduceMotion);d.dataset.railLabels=String(s.railLabels!==false);}catch(e){}})();`;

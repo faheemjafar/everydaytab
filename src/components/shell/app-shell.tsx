@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { tools } from "@/lib/tools";
 import { useSettings, useApplySettings } from "@/hooks/use-settings";
 import { recentsStore } from "@/hooks/use-persistent-tools";
-import { Rail } from "@/components/shell/rail";
+import { Rail, RAIL_WIDTH } from "@/components/shell/rail";
 import { Flyout, type PanelId } from "@/components/shell/flyout";
 import { TopBar } from "@/components/shell/top-bar";
 import { MobileNav } from "@/components/shell/mobile-nav";
@@ -27,6 +27,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { settings, update, mounted } = useSettings();
   const pinned = mounted && settings.sidebarPinned;
+  // Labels default on; before hydration trust the boot script's data attribute via CSS-free fallback (true).
+  const railLabels = mounted ? settings.railLabels : true;
 
   const activeCategory = categoryFromPath(pathname);
 
@@ -124,6 +126,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen w-full">
       <Rail
+        labels={railLabels}
+        onToggleLabels={() => update("railLabels", !settings.railLabels)}
         openPanel={openPanel}
         activeCategory={activeCategory}
         onEnter={onRailEnter}
@@ -141,9 +145,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Hover flyout: floating over content */}
       {!pinned && hoverPanel && (
         <div
-          className={cn(
-            "hidden md:block fixed left-12 top-0 h-screen w-72 z-40 shadow-float animate-in fade-in slide-in-from-left-1 duration-100"
-          )}
+          style={{ left: railLabels ? RAIL_WIDTH.labels : RAIL_WIDTH.icons }}
+          className={cn("hidden md:block fixed top-0 h-screen w-72 z-40 shadow-float animate-in fade-in slide-in-from-left-1 duration-100")}
           onMouseEnter={onFlyoutEnter}
           onMouseLeave={onRailLeave}
         >

@@ -2,15 +2,21 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Clock, Home, Settings, Star } from "lucide-react";
+import { ChevronRight, Clock, Home, PanelLeftClose, PanelLeftOpen, Settings, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { categories, categoryStyle } from "@/lib/tools";
+import { categories, categoryStyle, getToolsByCategory } from "@/lib/tools";
 import { LucideIcon } from "@/components/lucide-icon";
 import { usePersistentTools } from "@/hooks/use-persistent-tools";
 import type { PanelId } from "@/components/shell/flyout";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
 
+/** Rail width in px for each mode — the flyout offsets itself by this. */
+export const RAIL_WIDTH = { labels: 184, icons: 48 } as const;
+
 interface RailProps {
+  /** Show text labels next to icons (default). Icon-only when false. */
+  labels: boolean;
+  onToggleLabels: () => void;
   openPanel: PanelId | null;
   activeCategory?: string;
   onEnter: (panel: PanelId) => void;
@@ -18,61 +24,71 @@ interface RailProps {
   onClick: (panel: PanelId) => void;
 }
 
-export function Rail({ openPanel, activeCategory, onEnter, onLeave, onClick }: RailProps) {
+export function Rail({ labels, onToggleLabels, openPanel, activeCategory, onEnter, onLeave, onClick }: RailProps) {
   const pathname = usePathname();
-  const { favoriteTools, mounted } = usePersistentTools();
+  const { favoriteTools, recentTools, mounted } = usePersistentTools();
   const favCount = mounted ? favoriteTools.length : 0;
+  const recentCount = mounted ? recentTools.length : 0;
 
   return (
     <nav
       aria-label="Primary"
-      className="hidden md:flex flex-col items-center w-12 h-screen sticky top-0 shrink-0 bg-sidebar border-r border-sidebar-border z-40"
+      style={{ width: labels ? RAIL_WIDTH.labels : RAIL_WIDTH.icons }}
+      className="hidden md:flex flex-col h-screen sticky top-0 shrink-0 bg-sidebar border-r border-sidebar-border z-40 transition-[width] duration-150"
       onMouseLeave={onLeave}
     >
       <Link
         href="/"
         aria-label="EverydayTab home"
-        className="flex items-center justify-center w-12 h-12 shrink-0 border-b border-sidebar-border"
+        className={cn("flex items-center gap-2 h-12 shrink-0 border-b border-sidebar-border", labels ? "px-3" : "justify-center")}
       >
-        <img src="/logo.svg" alt="" className="w-6 h-6 rounded-sm" draggable={false} />
+        <img src="/logo.svg" alt="" className="w-6 h-6 rounded-sm shrink-0" draggable={false} />
+        {labels && <span className="font-semibold text-sm tracking-tight truncate">EverydayTab</span>}
       </Link>
 
-      <div className="flex flex-col items-center gap-0.5 py-2 w-full">
-        <RailLink href="/" label="Home" active={pathname === "/"}>
+      <div className={cn("flex flex-col gap-0.5 py-2", labels ? "px-2" : "px-1.5")}>
+        <RailLink href="/" label="Home" labels={labels} active={pathname === "/"}>
           <Home className="w-4 h-4" />
         </RailLink>
         <RailButton
           label="Favorites"
+          labels={labels}
           panel="favorites"
           open={openPanel === "favorites"}
-          badge={favCount}
+          count={favCount}
           onEnter={onEnter}
           onClick={onClick}
         >
           <Star className={cn("w-4 h-4", favCount > 0 && "fill-amber-500 text-amber-500")} />
         </RailButton>
-        <RailButton label="Recents" panel="recents" open={openPanel === "recents"} onEnter={onEnter} onClick={onClick}>
+        <RailButton label="Recents" labels={labels} panel="recents" open={openPanel === "recents"} count={recentCount} onEnter={onEnter} onClick={onClick}>
           <Clock className="w-4 h-4" />
         </RailButton>
       </div>
 
-      <div className="w-6 h-px bg-sidebar-border shrink-0" />
+      {labels ? (
+        <p className="px-4 pt-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">Categories</p>
+      ) : (
+        <div className="mx-auto w-6 h-px bg-sidebar-border shrink-0" />
+      )}
 
-      <div className="flex-1 flex flex-col items-center gap-0.5 py-2 w-full overflow-y-auto no-scrollbar">
+      <div className={cn("flex-1 flex flex-col gap-0.5 py-1 overflow-y-auto no-scrollbar", labels ? "px-2" : "px-1.5")}>
         {categories.map((c) => {
           const open = openPanel === c.id;
           const active = activeCategory === c.id;
           return (
             <RailButton
               key={c.id}
-              label={c.name}
+              label={labels ? c.short : c.name}
+              labels={labels}
               panel={c.id}
               open={open}
               active={active}
+              count={labels ? getToolsByCategory(c.id).length : undefined}
               onEnter={onEnter}
               onClick={onClick}
               style={categoryStyle(c)}
-              tinted={open || active}
+              tinted
             >
               <LucideIcon name={c.icon} className="w-4 h-4" />
             </RailButton>
@@ -80,18 +96,29 @@ export function Rail({ openPanel, activeCategory, onEnter, onLeave, onClick }: R
         })}
       </div>
 
-      <div className="flex flex-col items-center gap-0.5 py-2 w-full border-t border-sidebar-border">
-        <ThemeToggle className="w-9 h-9 rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground" />
-        <RailLink href="/settings" label="Settings" active={pathname.startsWith("/settings")}>
+      <div className={cn("flex flex-col gap-0.5 py-2 border-t border-sidebar-border", labels ? "px-2" : "px-1.5")}>
+        <RailLink href="/settings" label="Settings" labels={labels} active={pathname.startsWith("/settings")}>
           <Settings className="w-4 h-4" />
         </RailLink>
+        <div className={cn("flex items-center", labels ? "justify-between" : "flex-col gap-0.5")}>
+          <ThemeToggle className={cn(railItemBase, "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground", labels ? "w-9" : "w-full")} />
+          <button
+            type="button"
+            onClick={onToggleLabels}
+            aria-label={labels ? "Collapse sidebar" : "Expand sidebar"}
+            title={labels ? "Collapse sidebar" : "Expand sidebar"}
+            className={cn(railItemBase, "group/rail relative text-muted-foreground hover:bg-sidebar-accent hover:text-foreground", labels ? "w-9" : "w-full")}
+          >
+            {labels ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
+            {!labels && <Tooltip label="Expand sidebar" />}
+          </button>
+        </div>
       </div>
     </nav>
   );
 }
 
-const railItemBase =
-  "relative group/rail flex items-center justify-center w-9 h-9 rounded-md transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring";
+const railItemBase = "flex items-center justify-center h-9 rounded-md transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 function Tooltip({ label }: { label: string }) {
   return (
@@ -104,7 +131,7 @@ function Tooltip({ label }: { label: string }) {
   );
 }
 
-function RailLink({ href, label, active, children }: { href: string; label: string; active?: boolean; children: React.ReactNode }) {
+function RailLink({ href, label, labels, active, children }: { href: string; label: string; labels: boolean; active?: boolean; children: React.ReactNode }) {
   return (
     <Link
       href={href}
@@ -112,21 +139,24 @@ function RailLink({ href, label, active, children }: { href: string; label: stri
       aria-current={active ? "page" : undefined}
       className={cn(
         railItemBase,
-        active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+        "group/rail relative w-full",
+        labels ? "justify-start gap-2.5 px-2.5 text-[13px]" : "",
+        active ? "bg-sidebar-accent text-foreground font-medium" : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
       )}
     >
-      {children}
-      <Tooltip label={label} />
+      <span className="w-5 h-5 flex items-center justify-center shrink-0">{children}</span>
+      {labels ? <span className="truncate">{label}</span> : <Tooltip label={label} />}
     </Link>
   );
 }
 
 function RailButton({
   label,
+  labels,
   panel,
   open,
   active,
-  badge,
+  count,
   tinted,
   style,
   onEnter,
@@ -134,16 +164,18 @@ function RailButton({
   children,
 }: {
   label: string;
+  labels: boolean;
   panel: PanelId;
   open: boolean;
   active?: boolean;
-  badge?: number;
+  count?: number;
   tinted?: boolean;
   style?: React.CSSProperties;
   onEnter: (panel: PanelId) => void;
   onClick: (panel: PanelId) => void;
   children: React.ReactNode;
 }) {
+  const highlight = open || active;
   return (
     <button
       type="button"
@@ -156,17 +188,38 @@ function RailButton({
       style={style}
       className={cn(
         railItemBase,
-        tinted ? "cat-chip" : open || active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+        "group/rail relative w-full",
+        labels ? "justify-start gap-2.5 px-2.5 text-[13px]" : "",
+        highlight ? "bg-sidebar-accent text-foreground font-medium" : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
       )}
     >
-      {children}
-      {active && <span className="absolute -left-1.5 top-1/2 -translate-y-1/2 w-1 h-4 rounded-full bg-primary" />}
-      {!!badge && badge > 0 && (
-        <span className="absolute top-1 right-1 min-w-3.5 h-3.5 px-0.5 rounded-full bg-amber-500 text-[9px] font-bold text-white flex items-center justify-center tabular-nums">
-          {badge > 9 ? "9+" : badge}
-        </span>
+      <span
+        className={cn(
+          "w-5 h-5 flex items-center justify-center shrink-0 rounded-sm",
+          tinted && (labels || highlight) && "cat-chip",
+          !labels && tinted && highlight && "w-7 h-7"
+        )}
+      >
+        {children}
+      </span>
+      {labels ? (
+        <>
+          <span className="truncate flex-1 text-left">{label}</span>
+          {typeof count === "number" && count > 0 && (
+            <span className={cn("text-[11px] tabular-nums", highlight ? "text-foreground/70" : "text-muted-foreground/60")}>{count}</span>
+          )}
+          <ChevronRight className={cn("w-3.5 h-3.5 text-muted-foreground/50 transition-opacity", open ? "opacity-100" : "opacity-0 group-hover/rail:opacity-60")} />
+        </>
+      ) : (
+        <>
+          {typeof count === "number" && count > 0 && panel === "favorites" && (
+            <span className="absolute top-0.5 right-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-amber-500 text-[9px] font-bold text-white flex items-center justify-center tabular-nums">
+              {count > 9 ? "9+" : count}
+            </span>
+          )}
+          {!open && <Tooltip label={label} />}
+        </>
       )}
-      {!open && <Tooltip label={label} />}
     </button>
   );
 }
