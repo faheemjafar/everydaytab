@@ -265,4 +265,35 @@
     background-image: radial-gradient(color-mix(in oklch, var(--foreground) 10%, transparent) 1px, transparent 1px);
     background-size: 14px 14px;
   }
+
+  /* Rendered Markdown / rich HTML previews (no typography plugin installed). */
+  .md-preview {
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--foreground);
+    overflow-wrap: anywhere;
+  }
+  .md-preview > :first-child { margin-top: 0; }
+  .md-preview :where(h1, h2, h3, h4, h5, h6) { font-weight: 600; line-height: 1.25; margin: 1.4em 0 0.5em; letter-spacing: -0.01em; }
+  .md-preview h1 { font-size: 1.75em; }
+  .md-preview h2 { font-size: 1.4em; padding-bottom: 0.25em; border-bottom: 1px solid var(--border); }
+  .md-preview h3 { font-size: 1.15em; }
+  .md-preview :where(p, ul, ol, blockquote, pre, table, hr) { margin: 0 0 1em; }
+  .md-preview :where(ul, ol) { padding-left: 1.5em; }
+  .md-preview ul { list-style: disc; }
+  .md-preview ol { list-style: decimal; }
+  .md-preview li + li { margin-top: 0.25em; }
+  .md-preview li > :where(ul, ol) { margin: 0.25em 0 0; }
+  .md-preview a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+  .md-preview strong { font-weight: 600; }
+  .md-preview blockquote { border-left: 3px solid var(--border); padding-left: 1em; color: var(--muted-foreground); }
+  .md-preview code { font-family: var(--font-mono); font-size: 0.875em; background: var(--muted); padding: 0.1em 0.35em; border-radius: 4px; }
+  .md-preview pre { background: var(--muted); padding: 0.85em 1em; border-radius: var(--radius); overflow-x: auto; }
+  .md-preview pre code { background: none; padding: 0; font-size: 0.85em; }
+  .md-preview hr { border: 0; border-top: 1px solid var(--border); }
+  .md-preview table { border-collapse: collapse; display: block; overflow-x: auto; }
+  .md-preview :where(th, td) { border: 1px solid var(--border); padding: 0.35em 0.7em; text-align: left; }
+  .md-preview th { background: var(--muted); font-weight: 600; }
+  .md-preview img { max-width: 100%; border-radius: 4px; }
+  .md-preview input[type="checkbox"] { margin-right: 0.4em; }
 }

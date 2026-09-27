@@ -1,133 +1,114 @@
 "use client";
 
-import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useMemo } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  BarChart3, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  Info,
-  History,
-  Languages,
-  BookOpen,
-  AlignLeft,
-  Search,
-  Activity,
-  Type
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useMemo, useState } from "react";
 import readability from "text-readability";
+import { ToolLayout } from "@/components/tool-layout";
+import { ClearButton, CodeArea, Stat, StatGrid, StatusBadge, ToolPanel, Toggle } from "@/components/tool";
+import { cn } from "@/lib/utils";
+
+const SAMPLE = `Readability matters. Short sentences help. They are easy to scan and easy to remember.
+
+However, when a writer strings together numerous subordinate clauses, qualifications, and parenthetical observations that, while individually reasonable, collectively obscure the central argument, the reader is forced to hold an unreasonable amount of information in working memory before reaching the point.
+
+Use plain words. Cut what you don't need.`;
+
+function ease(score: number) {
+  if (score >= 80) return { label: "Easy", audience: "Age 11–13 · conversational", tone: "success" as const };
+  if (score >= 60) return { label: "Plain English", audience: "Age 13–15 · most web copy", tone: "success" as const };
+  if (score >= 50) return { label: "Fairly difficult", audience: "High school senior", tone: "warning" as const };
+  if (score >= 30) return { label: "Difficult", audience: "University", tone: "warning" as const };
+  return { label: "Very difficult", audience: "Graduate / academic", tone: "error" as const };
+}
+
+const split = (t: string) => t.match(/[^.!?\n]+[.!?]+["')\]]*|[^.!?\n]+$/gm)?.map((s) => s.trim()).filter(Boolean) ?? [];
+const words = (s: string) => s.match(/[\p{L}\p{N}'’-]+/gu) ?? [];
 
 export default function ReadabilityAnalyzer() {
-  const [input, setInput] = useState("EverydayTab provides a comprehensive collection of tools for developers and creators. It is designed to be fast, secure, and entirely client-side, ensuring your data never leaves your browser.");
-  const [copied, setCopied] = useState(false);
+  const [input, setInput] = useState("");
+  const [highlight, setHighlight] = useState(true);
 
-  const stats = useMemo(() => {
-    if (!input.trim() || input.length < 10) return null;
-
+  const r = useMemo(() => {
+    const wc = words(input).length;
+    if (wc < 3) return null;
+    const grades = {
+      "Flesch–Kincaid": readability.fleschKincaidGrade(input),
+      "Gunning Fog": readability.gunningFog(input),
+      SMOG: readability.smogIndex(input),
+      "Coleman–Liau": readability.colemanLiauIndex(input),
+      ARI: readability.automatedReadabilityIndex(input),
+      "Dale–Chall": readability.daleChallReadabilityScore(input),
+    };
     return {
-      fleschKincaidGrade: readability.fleschKincaidGrade(input),
-      fleschReadingEase: readability.fleschReadingEase(input),
-      gunningFog: readability.gunningFog(input),
-      automatedReadabilityIndex: readability.automatedReadabilityIndex(input),
-      colemanLiauIndex: readability.colemanLiauIndex(input),
-      difficultWords: readability.difficultWords(input)
+      ease: readability.fleschReadingEase(input),
+      grades,
+      consensus: readability.textStandard(input, false) as string,
+      words: wc,
+      // The library's sentenceCount undercounts; use our own splitter for counts.
+      sentences: split(input).length,
+      avgSentence: wc / Math.max(1, split(input).length),
+      syllables: readability.averageSyllablePerWord(input),
+      difficult: readability.difficultWords(input),
+      poly: readability.polySyllableCount(input),
     };
   }, [input]);
 
-  const getEaseLabel = (score: number) => {
-    if (score >= 90) return { label: "Very Easy", color: "text-green-500", desc: "5th grade level" };
-    if (score >= 80) return { label: "Easy", color: "text-green-500", desc: "6th grade level" };
-    if (score >= 70) return { label: "Fairly Easy", color: "text-green-400", desc: "7th grade level" };
-    if (score >= 60) return { label: "Standard", color: "text-primary", desc: "8th-9th grade level" };
-    if (score >= 50) return { label: "Fairly Difficult", color: "text-orange-400", desc: "10th-12th grade level" };
-    if (score >= 30) return { label: "Difficult", color: "text-orange-500", desc: "College level" };
-    return { label: "Very Confusing", color: "text-destructive", desc: "College graduate level" };
-  };
+  const sentences = useMemo(() => split(input).map((s) => ({ s, n: words(s).length })), [input]);
+  const e = r ? ease(r.ease) : null;
+  const long = sentences.filter((x) => x.n > 25).length;
 
   return (
     <ToolLayout toolId="readability-analyzer">
+      <div className="space-y-3">
+        <ToolPanel title="Text" actions={<><StatusBadge>{r?.words ?? 0} words</StatusBadge>{!input && <button type="button" onClick={() => setInput(SAMPLE)} className="h-7 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted">Sample</button>}<ClearButton onClick={() => setInput("")} iconOnly disabled={!input} /></>}>
+          <CodeArea value={input} onChange={(ev) => setInput(ev.target.value)} minHeight={200} placeholder="Paste an article, email or paragraph…" className="font-sans text-[14px]" />
+        </ToolPanel>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Editor Side */}
-        <div className="lg:col-span-12 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <AlignLeft className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Text Input</span>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => setInput("")} className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive">
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </div>
-            <CardContent className="p-0">
-              <Textarea
-                placeholder="Enter text to analyze readability..."
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                className="w-full h-48 p-12 bg-transparent border-none focus-visible:ring-0 resize-none font-sans text-xl leading-relaxed"
-              />
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Results Grid */}
-        <div className="lg:col-span-12">
-          {stats ? (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                {/* Main Score Card */}
-                <Card className="md:col-span-1 border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col items-center justify-center p-8 text-center">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-4">Reading Ease Score</p>
-                  <div className="text-8xl font-black tracking-tighter text-primary drop-shadow-sm">
-                    {Math.round(stats.fleschReadingEase)}
-                  </div>
-                  <div className="mt-4 space-y-1">
-                    <p className={cn("text-xl font-bold", getEaseLabel(stats.fleschReadingEase).color)}>
-                      {getEaseLabel(stats.fleschReadingEase).label}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                      {getEaseLabel(stats.fleschReadingEase).desc}
-                    </p>
-                  </div>
-                </Card>
-
-                {/* Grid of Other Scores */}
-                <div className="md:col-span-2 grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  {[
-                    { label: "Grade Level", value: stats.fleschKincaidGrade, icon: Type },
-                    { label: "Fog Index", value: stats.gunningFog, icon: Activity },
-                    { label: "ARI Index", value: stats.automatedReadabilityIndex, icon: Zap },
-                    { label: "Coleman-Liau", value: stats.colemanLiauIndex, icon: History },
-                    { label: "Difficult Words", value: stats.difficultWords, icon: Info }
-                  ].map((item, i) => (
-                    <div key={i} className="p-6 rounded-3xl bg-muted/20 border border-border/10 flex flex-col gap-3 transition-all hover:bg-muted/30">
-                      <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center text-primary shadow-inner shrink-0">
-                        <item.icon className="w-4 h-4" />
+        {r && e && (
+          <>
+            <div className="grid gap-3 md:grid-cols-[260px_1fr]">
+              <ToolPanel bodyClassName="p-4 flex flex-col items-center justify-center gap-1 text-center">
+                <span className="text-4xl font-semibold tabular-nums">{Math.round(r.ease)}</span>
+                <span className="text-xs text-muted-foreground">Flesch reading ease (0–100)</span>
+                <StatusBadge tone={e.tone} className="mt-2">{e.label}</StatusBadge>
+                <span className="text-[11px] text-muted-foreground">{e.audience}</span>
+              </ToolPanel>
+              <ToolPanel title={`Grade level · consensus ${r.consensus}`}>
+                <ul className="divide-y divide-border">
+                  {Object.entries(r.grades).map(([k, v]) => (
+                    <li key={k} className="flex items-center gap-3 px-3.5 h-9 text-sm">
+                      <span className="w-32 text-xs text-muted-foreground">{k}</span>
+                      <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div className={cn("h-full rounded-full", v <= 8 ? "bg-emerald-500" : v <= 12 ? "bg-amber-500" : "bg-red-500")} style={{ width: `${Math.min(100, (v / 18) * 100)}%` }} />
                       </div>
-                      <div>
-                        <p className="text-xl font-black tracking-tight">{item.value}</p>
-                        <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider">{item.label}</p>
-                      </div>
-                    </div>
+                      <span className="w-10 text-right font-mono text-xs tabular-nums">{v.toFixed(1)}</span>
+                    </li>
                   ))}
+                </ul>
+              </ToolPanel>
+            </div>
+            <StatGrid>
+              <Stat label="Sentences" value={r.sentences} hint={`${long} over 25 words`} />
+              <Stat label="Avg sentence" value={`${r.avgSentence.toFixed(1)} words`} hint="Aim for 15–20" />
+              <Stat label="Syllables / word" value={r.syllables.toFixed(2)} />
+              <Stat label="Complex words" value={r.poly} hint={`${r.difficult} uncommon`} />
+            </StatGrid>
+            <ToolPanel title="Sentence length" actions={<Toggle label="Highlight" checked={highlight} onChange={setHighlight} />}>
+              <p className="px-4 py-3 text-[14px] leading-7">
+                {sentences.map((x, i) => (
+                  <span key={i} className={cn(highlight && x.n > 30 && "bg-red-500/20", highlight && x.n > 20 && x.n <= 30 && "bg-amber-500/20", "rounded-[2px]")} title={`${x.n} words`}>
+                    {x.s}{" "}
+                  </span>
+                ))}
+              </p>
+              {highlight && (
+                <div className="flex gap-4 px-4 pb-3 text-[11px] text-muted-foreground">
+                  <span><span className="inline-block w-3 h-3 align-middle rounded-sm bg-amber-500/30 mr-1" />21–30 words</span>
+                  <span><span className="inline-block w-3 h-3 align-middle rounded-sm bg-red-500/30 mr-1" />over 30 — consider splitting</span>
                 </div>
-              </div>
-            </div>
-          ) : (
-            <div className="p-20 rounded-[2.5rem] bg-muted/10 border border-border/20 flex flex-col items-center justify-center text-center gap-4 border-dashed opacity-30">
-              <BookOpen className="w-12 h-12 text-muted-foreground" />
-              <p className="text-muted-foreground italic font-medium">Insights will appear here as you type...</p>
-            </div>
-          )}
-        </div>
+              )}
+            </ToolPanel>
+          </>
+        )}
       </div>
     </ToolLayout>
   );

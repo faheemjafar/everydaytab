@@ -71,3 +71,4 @@ export {
 } from "./media";
 export { CropBox, initialCrop, fitCrop, type CropRect } from "./crop-box";
 export { Waveform } from "./waveform";
+export { TextTransform, Toggle } from "./text-transform";

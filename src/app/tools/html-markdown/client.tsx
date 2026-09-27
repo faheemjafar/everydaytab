@@ -1,115 +1,68 @@
 "use client";
 
-import { ToolLayout } from "@/components/tool-layout";
-
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  FileCode, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  ArrowRightLeft,
-  FileText,
-  RefreshCw,
-  Search,
-  Code
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useMemo, useState } from "react";
 import TurndownService from "turndown";
+import { ToolLayout } from "@/components/tool-layout";
+import { Field, Segmented, TextTransform } from "@/components/tool";
+
+const SAMPLE = `<h1>Release notes</h1>
+<p>This version is <strong>faster</strong> and <em>smaller</em>. See the <a href="https://example.com/docs">docs</a>.</p>
+<h2>Changes</h2>
+<ul>
+  <li>New <code>--watch</code> flag</li>
+  <li>Fixed a crash on startup</li>
+</ul>
+<pre><code class="language-bash">npm install my-package</code></pre>
+<blockquote>Thanks to all contributors!</blockquote>`;
 
 export default function HTMLToMarkdown() {
-  const [input, setInput] = useState("<h1>Welcome to EverydayTab</h1>\n<p>This is <strong>bold</strong> and this is <em>italic</em>.</p>\n<ul>\n  <li>Item 1</li>\n  <li>Item 2</li>\n</ul>");
-  const [output, setOutput] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [input, setInput] = useState("");
+  const [heading, setHeading] = useState<"atx" | "setext">("atx");
+  const [bullet, setBullet] = useState<"-" | "*" | "+">("-");
+  const [code, setCode] = useState<"fenced" | "indented">("fenced");
+  const [links, setLinks] = useState<"inlined" | "referenced">("inlined");
 
-  const convert = (val: string) => {
-    setInput(val);
-    setError(null);
-    if (!val.trim()) {
-      setOutput("");
-      return;
-    }
-
+  const { output, error } = useMemo(() => {
+    if (!input.trim()) return { output: "", error: null };
     try {
-      const turndownService = new TurndownService({
-        headingStyle: 'atx',
-        codeBlockStyle: 'fenced',
-        bulletListMarker: '-'
-      });
-      const markdown = turndownService.turndown(val);
-      setOutput(markdown);
-    } catch (e: any) {
-      setError("Failed to convert HTML. Please check your source code.");
-      setOutput("");
+      const td = new TurndownService({ headingStyle: heading, bulletListMarker: bullet, codeBlockStyle: code, linkStyle: links, emDelimiter: "*" });
+      // Strip elements that have no Markdown equivalent instead of leaking their text.
+      td.remove(["script", "style", "noscript", "iframe"]);
+      return { output: td.turndown(input), error: null };
+    } catch {
+      return { output: "", error: "Couldn't parse that HTML." };
     }
-  };
-
-  const copyToClipboard = () => {
-    if (!output) return;
-    navigator.clipboard.writeText(output);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  }, [input, heading, bullet, code, links]);
 
   return (
     <ToolLayout toolId="html-markdown">
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch h-[calc(100vh-300px)] min-h-[500px]">
-        {/* Input Panel */}
-        <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col">
-          <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <FileCode className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">HTML Source</span>
-            </div>
-            <Button variant="ghost" size="icon" onClick={() => convert("")} className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive">
-              <Trash2 className="w-4 h-4" />
-            </Button>
-          </div>
-          <CardContent className="p-0 flex-1 relative">
-            <Textarea
-              placeholder="Paste your HTML code here..."
-              value={input}
-              onChange={(e) => convert(e.target.value)}
-              className="w-full h-full p-8 bg-transparent border-none focus-visible:ring-0 resize-none font-mono text-sm leading-relaxed"
-            />
-          </CardContent>
-        </Card>
-
-        {/* Output Panel */}
-        <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col relative">
-          <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-3">
-              <Zap className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-primary">Markdown Result</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={copyToClipboard}
-              disabled={!output}
-              className={cn(
-                "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                copied && "text-green-500 hover:text-green-500"
-              )}
-            >
-              {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-              {copied ? "Copied" : "Copy Result"}
-            </Button>
-          </div>
-          
-          <CardContent className="p-0 flex-1 relative bg-primary/[0.01]">
-            <pre className="w-full h-full min-h-[400px] p-8 font-mono text-sm leading-relaxed overflow-auto whitespace-pre selection:bg-primary/20 text-foreground/80">
-              {output || <span className="text-muted-foreground italic opacity-50">Markdown will appear here...</span>}
-            </pre>
-          </CardContent>
-        </Card>
-      </div>
+      <TextTransform
+        input={input}
+        onInput={setInput}
+        output={output}
+        error={error}
+        sample={SAMPLE}
+        inputLabel="HTML"
+        outputLabel="Markdown"
+        filename="converted.md"
+        placeholder="Paste HTML…"
+        options={
+          <>
+            <Field label="Headings">
+              <Segmented size="sm" value={heading} onChange={setHeading} options={[{ value: "atx", label: "# ATX" }, { value: "setext", label: "Underline" }]} />
+            </Field>
+            <Field label="Bullets">
+              <Segmented size="sm" value={bullet} onChange={setBullet} options={[{ value: "-", label: "-" }, { value: "*", label: "*" }, { value: "+", label: "+" }]} />
+            </Field>
+            <Field label="Code blocks">
+              <Segmented size="sm" value={code} onChange={setCode} options={[{ value: "fenced", label: "``` Fenced" }, { value: "indented", label: "Indented" }]} />
+            </Field>
+            <Field label="Links">
+              <Segmented size="sm" value={links} onChange={setLinks} options={[{ value: "inlined", label: "Inline" }, { value: "referenced", label: "Reference" }]} />
+            </Field>
+          </>
+        }
+      />
     </ToolLayout>
   );
 }
