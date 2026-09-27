@@ -1,179 +1,136 @@
 # EverydayTab
 
-> A comprehensive, privacy-first collection of 160+ high-performance web utilities. Built with modern web standards and designed to run entirely in your browser.
+> 240 free, privacy-first web tools that run entirely in your browser. No sign-up, no uploads, no watermarks, no file-size limits.
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub Repo](https://img.shields.io/badge/GitHub-faheemjafar%2Feverydaytab-181717?logo=github)](https://github.com/faheemjafar/everydaytab)
 [![Next.js](https://img.shields.io/badge/Built%20with-Next.js%2016-black?logo=next.js)](https://nextjs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue?logo=typescript)](https://www.typescriptlang.org)
-[![Tailwind CSS](https://img.shields.io/badge/Styled%20with-Tailwind%20CSS-06B6D4?logo=tailwindcss)](https://tailwindcss.com)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-v4-06B6D4?logo=tailwindcss)](https://tailwindcss.com)
 
-> Built and maintained solo by [@faheemjafar](https://github.com/faheemjafar).
+**Live:** [everydaytab.com](https://everydaytab.com) · Built and maintained solo by [@faheemjafar](https://github.com/faheemjafar).
 
-## Features
+## What's inside
 
-EverydayTab provides **160+ utilities** across **9 categories**, all running client-side:
+**240 tools** across **14 categories**, ordered by demand:
 
-- **PDF Tools** — Merge, split, rotate, compress, sign, watermark, crop, extract text, edit bookmarks, add page numbers, remove blank pages, apply scanner effects, adjust colors, and more.
-- **Developer Tools** — JSON formatters, validators, and converters; YAML/TOML/XML tools; GraphQL utilities; SQL prettifiers; cURL converters; JWT generators & parsers; regex testers; cron utilities; and cheat sheets.
-- **Text Tools** — Case converters, diff checkers, word counters, Markdown table generators, string obfuscators, text statistics, and Unicode/Binary converters.
-- **Converters** — Unit converters, temperature converters, integer base converters, IPv4 converters, text-to-Unicode, and JSON/XML/YAML/TOML interchanges.
-- **Math** — Calculators, math evaluators, percentage calculators, ETA calculators, stopwatches, and timestamp converters.
-- **Image Tools** — SVG optimizers, SVG-to-JSX converters, SVG path visualizers, color palette extractors, Lottie previewers, gradient studios, box shadow studios, glassmorphism generators, contrast checkers, color blindness simulators, and placeholder generators.
-- **Color Tools** — Modern color converters (HEX, RGB, HSL, OKLCH, LAB, LCH), color blindness simulators, contrast checkers, and palette extractors.
-- **Generators** — QR codes, barcodes, WiFi QR codes, UUIDs, ULIDs, tokens, passwords, Lorem Ipsum, meta tags, OG tags, numeronyms, and more.
-- **Security** — AES encryption, Bcrypt hashing, HMAC generation, hash generators, JWT tools, SSL decoders, OTP/TOTP generators, BIP39 mnemonic generators, password strength checkers, and safelink decoders.
+| Category | Tools | Examples |
+|---|---:|---|
+| **PDF** | 24 | Merge, split, compress, rotate, sign, watermark, crop, page numbers, extract text, remove blank pages, scanner effect |
+| **Image** | 18 | Compressor, converter, resizer, cropper, aspect-ratio, SVG optimizer, CSS grid/flexbox/gradient/box-shadow generators |
+| **Video** | 13 | Converter, compressor, trimmer, merger, cropper, rotator, speed changer, GIF ↔ video, extract audio |
+| **Audio** | 19 | Converter, trimmer, merger, compressor, equalizer, loudness normalizer, silence remover, ringtone maker |
+| **Converters** | 15 | Unix timestamp, time zones, units, temperature, number bases, Roman numerals, Morse, IBAN validator |
+| **Text** | 18 | Word counter, case converter, diff, sorter, cleaner, slugify, readability, Markdown ↔ HTML |
+| **Developer** | 65 | JSON (format, diff, schema, → TS/Go/SQL), YAML/TOML/XML, JWT, regex, cron, cURL, Docker Compose, SQL, GraphQL, IP/subnet |
+| **Generators** | 13 | QR codes, barcodes, WiFi QR, UUID, ULID, tokens, passwords, Lorem Ipsum, invoices, ASCII art |
+| **Color** | 9 | HEX/RGB/HSL/OKLCH/LAB converter, palette extractor, contrast checker, color-blindness simulator, name finder |
+| **Math** | 16 | Calculator, expression evaluator, percentage, fractions, BMI, calories, salary, tips, dates, age, ETA |
+| **Security** | 15 | Hashes, HMAC, bcrypt, AES, RSA keys, JWT generator, OTP/TOTP, BIP39, password strength, SSL decoder |
+| **SEO** | 7 | Meta tags, Open Graph, robots.txt, sitemap, FAQ schema, keyword analyzer, URL slugs |
+| **Markdown** | 5 | Live editor, table generator, cheatsheet, → HTML, file combiner |
+| **Files** | 3 | ZIP, archive extractor, batch renamer |
 
-### Key Design Principles
+Heavy lifting (audio, video, PDF) is done with WebAssembly builds of FFmpeg, pdf-lib and pdf.js — in the browser, on your machine.
 
-- **Privacy First** — All processing happens in the browser. No data is sent to any server.
-- **Keyboard-Friendly** — Global search with `Cmd+K` / `Ctrl+K`, settings with `Cmd+,`, arrow key navigation, and quick tool access.
-- **Accessible** — Built with accessibility in mind using Radix UI primitives and semantic HTML.
-- **Dark & Light Mode** — Seamless theme switching with `next-themes`.
-- **Responsive** — Icon rail with hover/pinnable tool flyouts on desktop; bottom tab bar and full-screen browser on mobile.
-- **Customisable** — Settings page for theme, accent colour, density, font size, sidebar behaviour, and local data management.
-- **Fast** — Optimized with Next.js App Router, lazy loading, and efficient client-side rendering.
+## Principles
 
-## Tech Stack
+- **Privacy first.** Nothing you paste or upload leaves your device. There are no accounts and no server-side processing.
+- **Fast to reach.** `⌘K` / `Ctrl+K` searches all 240 tools; the sidebar opens any category's tool list on hover and can be pinned; recents and favorites are one click away.
+- **Consistent.** One design system ("Workbench": warm neutrals, a single accent, 6px radius, no blur) and a shared set of tool primitives, so every tool behaves the same.
+- **Yours to tune.** Settings for theme, accent colour, density, font size, sidebar labels/pinning, guide visibility, and export/import of your local data. `⌘,` opens it.
+- **Works everywhere.** Icon rail + flyouts on desktop; bottom tab bar and full-screen browser on mobile. Installable as a PWA.
+- **Crawlable.** Every tool and category page has server-rendered guide content, JSON-LD and a generated Open Graph image.
 
-| Technology | Purpose |
+## Tech stack
+
+| | |
 |---|---|
-| [Next.js 16](https://nextjs.org) | React framework with App Router |
-| [React 19](https://react.dev) | UI library |
-| [TypeScript](https://www.typescriptlang.org) | Type safety |
-| [Tailwind CSS v4](https://tailwindcss.com) | Utility-first styling |
-| [Radix UI](https://www.radix-ui.com) | Accessible UI primitives |
-| [Lucide React](https://lucide.dev) | Icon system |
-| [pdf-lib](https://pdf-lib.js.org) | PDF creation and manipulation |
-| [pdfjs-dist](https://mozilla.github.io/pdf.js/) | PDF rendering and text extraction |
-| [shadcn/ui](https://ui.shadcn.com) | Component patterns |
+| [Next.js 16](https://nextjs.org) (App Router, Turbopack) | Framework, static generation, metadata/OG routes |
+| [React 19](https://react.dev) + [TypeScript 5](https://www.typescriptlang.org) | UI and type safety |
+| [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) + [Radix UI](https://www.radix-ui.com) | Styling and accessible primitives |
+| [Lucide](https://lucide.dev) | Icons |
 | [cmdk](https://cmdk.paco.me) | Command palette |
+| [pdf-lib](https://pdf-lib.js.org), [pdf.js](https://mozilla.github.io/pdf.js/), [@ffmpeg/ffmpeg](https://ffmpegwasm.netlify.app) | Client-side PDF, audio and video processing |
 
-## Getting Started
+## Getting started
 
-### Prerequisites
-
-- Node.js 20 or later
-- npm, yarn, pnpm, or bun
-
-### Installation
+Requires Node.js 20+.
 
 ```bash
-# Clone the repository
 git clone https://github.com/faheemjafar/everydaytab.git
 cd everydaytab
-
-# Install dependencies
 npm install
-
-# Run the development server
-npm run dev
+npm run dev        # http://localhost:3000
 ```
-
-Open [http://localhost:3000](http://localhost:3000) to view the app.
-
-### Build for Production
 
 ```bash
-npm run build
+npm run build      # production build (fully static)
+npm run lint       # eslint (React Compiler rules)
+npx tsc --noEmit   # type-check
 ```
 
-## Project Structure
+## Project structure
 
 ```
-everydaytab/
-├── src/
-│   ├── app/
-│   │   ├── tools/           # Individual tool pages
-│   │   ├── layout.tsx       # Root layout with sidebar, header, footer
-│   │   ├── page.tsx         # Home page with tool grid
-│   │   └── globals.css      # Global styles
-│   ├── components/
-│   │   ├── ui/              # shadcn/ui components
-│   │   ├── header.tsx       # Top navigation header
-│   │   ├── sidebar.tsx      # Category sidebar
-│   │   └── tool-card.tsx    # Tool grid cards
-│   ├── lib/
-│   │   ├── tools.ts         # Tool registry (categories & metadata)
-│   │   └── utils.ts         # Utility functions
-│   └── types/
-│       └── modules.d.ts     # Type declarations
-├── public/                  # Static assets
-├── LICENSE                  # MIT License
-├── next.config.ts           # Next.js configuration
-├── package.json
-├── tsconfig.json
-└── README.md
+src/
+├── app/
+│   ├── tools/<tool-id>/         # One folder per tool: page.tsx (metadata) + client.tsx (UI)
+│   ├── category/[id]/           # Category hub pages
+│   ├── settings/  favorites/    # User preference + favorites pages (local-only)
+│   ├── og/route.tsx             # Dynamic Open Graph images for tools & categories
+│   ├── layout.tsx               # Root layout → AppShell
+│   └── globals.css              # Design tokens
+├── components/
+│   ├── shell/                   # Rail, Flyout, TopBar, MobileNav, AppShell, footer
+│   ├── tool/                    # Shared tool primitives (ToolPanel, CodeArea, FileDropzone, …)
+│   ├── ui/                      # shadcn/ui primitives
+│   ├── tool-layout.tsx          # Header wrapper every tool renders inside
+│   └── command-palette.tsx      # ⌘K
+├── content/                     # Server-rendered guide text per tool / category
+├── hooks/                       # use-settings, use-persistent-tools, use-toast, use-ffmpeg
+└── lib/
+    ├── tools.ts                 # The registry: categories (ordered, with hue) and all tools
+    ├── settings.ts              # Settings schema, defaults, boot script
+    ├── local-store.ts           # localStorage-backed useSyncExternalStore
+    └── seo.ts                   # Metadata + JSON-LD generators
 ```
 
 ## Contributing
 
-We welcome contributions from the community!
+Issues and pull requests are welcome.
 
-### How to Contribute
+1. Fork, then `git checkout -b feat/my-tool`.
+2. Make your change; run `npm run lint`, `npx tsc --noEmit` and `npm run build`.
+3. Commit with a conventional message (`feat: add JSON diff visualizer`) and open a PR.
 
-1. **Fork** the repository and clone your fork.
-2. **Create a branch** for your feature or fix:
-   ```bash
-   git checkout -b feature/my-new-tool
-   ```
-3. **Make your changes** and ensure the app builds successfully:
-   ```bash
-   npm run build
-   ```
-4. **Commit** with clear, descriptive messages:
-   ```bash
-   git commit -m "feat: add JSON diff visualizer tool"
-   ```
-5. **Push** to your fork and open a **Pull Request**.
+### Adding a tool
 
-### Adding a New Tool
+1. Create `src/app/tools/<tool-id>/` with:
+   - `page.tsx` — copy from any existing tool; it wires `generateToolMetadata`, JSON-LD and `ToolSeoContent`.
+   - `client.tsx` — the UI. Wrap it in `<ToolLayout toolId="<tool-id>">` and build the workspace from `@/components/tool` (`ToolPanel`, `SplitLayout`, `OptionsLayout`, `CodeArea`, `FileDropzone`, `FileList`, `Field`, `Segmented`, `Stat`, `CopyButton`, `DownloadButton`, `StatusBadge`, `ToolAlert`, `PrivacyNote`). See `json-formatter`, `merge-pdf`, `qr-generator` or `image-compressor` for reference.
+2. Register it in `src/lib/tools.ts`: `id`, `name`, `description`, `category` (existing id), `icon` (a Lucide name that exists in `components/lucide-icon.tsx`), `path`, `tags`.
+3. Optionally add guide content in `src/content/tools/<tool-id>.ts` — it renders under the tool and feeds the FAQ/HowTo schema.
+4. Keep processing client-side, use exactly one `<Button size="lg">` for the primary action, and check both themes.
 
-1. Create a new folder under `src/app/tools/` using kebab-case naming.
-2. Add your tool's page component as `page.tsx`.
-3. Register the tool in `src/lib/tools.ts` with:
-   - `id`, `name`, `description`
-   - `category` (must match an existing category id)
-   - `icon` (a valid Lucide icon name)
-   - `path` (matching your folder name)
-   - `tags` for searchability
-4. Ensure the tool works in **both** light and dark modes.
-5. Keep all processing **client-side** unless there's a strong reason otherwise.
-
-### Code Style
-
-- Follow the existing TypeScript and React patterns.
-- Use Tailwind CSS utilities for styling.
-- Keep components focused and reusable.
-- Prefer server components where possible; use client components only for interactivity.
+Conventions for the UI system are in [`AGENTS.md`](AGENTS.md).
 
 ## Roadmap
 
-- [ ] Add more PDF tools (OCR, redaction, form filling)
-- [ ] Introduce batch/queue processing for file-based tools
-- [ ] Add user preferences and recent tool history (localStorage)
-- [ ] Internationalization (i18n) support
-- [ ] PWA support for offline usage
-- [ ] Plugin system for community tools
+- [ ] Migrate remaining tools onto the shared primitives (12 of 240 done)
+- [ ] Build-time popularity ranking from analytics exports
+- [ ] More PDF tools (OCR, redaction, form filling)
+- [ ] Batch/queue processing for file-based tools
+- [ ] Internationalisation
 
-## Acknowledgments
+## Support the project
 
-- Built with [Next.js](https://nextjs.org) by Vercel
-- Icons by [Lucide](https://lucide.dev)
-- UI patterns inspired by [shadcn/ui](https://ui.shadcn.com)
+EverydayTab is free, ad-free and 100% client-side. If it saves you time:
+
+- ⭐ Star the repo
+- 🐛 [Report a bug or request a tool](https://github.com/faheemjafar/everydaytab/issues)
+- 📣 Share it with someone who'd find it useful
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
-
-## Support
-
-EverydayTab is **free, ad-free, and 100% client-side**, built solo on nights and weekends. If it saves you time:
-
-- ⭐ **Star the repo** on GitHub
-- 🐛 **Report bugs or suggest tools** via [Issues](https://github.com/faheemjafar/everydaytab/issues)
-- 📣 **Share** the project with anyone who'd find it useful
-
----
-
-Made with precision by [Faheem Jawfar](https://github.com/faheemjafar).
+[MIT](LICENSE) — © [Faheem Jafar](https://github.com/faheemjafar)
