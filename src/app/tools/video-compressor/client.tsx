@@ -1,340 +1,76 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
+import { Minimize2 } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import {
-  Minimize2,
-  Upload,
-  Download,
-  Video,
-  Trash2,
-  CheckCircle2,
-  AlertCircle,
-  RotateCcw,
-  RefreshCw,
-  Zap,
-} from "lucide-react";
-import { useFFmpeg } from "@/hooks/use-ffmpeg";
-import { formatFileSize } from "@/lib/audio-utils";
-import { cn } from "@/lib/utils";
+import { ChoiceGrid, FASTSTART, Field, MediaTool, Segmented, h264, stem, useMediaFile } from "@/components/tool";
 
-export default function VideoCompressorClient() {
-  const [file, setFile] = useState<File | null>(null);
-  const [quality, setQuality] = useState<"low" | "medium" | "high">("medium");
-  const [resolution, setResolution] = useState("original");
-  const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{
-    url: string;
-    originalSize: number;
-    compressedSize: number;
-    reduction: number;
-    time: number;
-  } | null>(null);
+const LEVELS = {
+  light: { crf: 23, label: "Light", hint: "Near original" },
+  balanced: { crf: 28, label: "Balanced", hint: "Recommended" },
+  strong: { crf: 32, label: "Strong", hint: "Much smaller" },
+  extreme: { crf: 36, label: "Extreme", hint: "Smallest" },
+} as const;
+type Level = keyof typeof LEVELS;
 
-  const { ffmpeg, loaded, fetchFile, setOnProgress } = useFFmpeg();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+const RES = { original: 0, "1080": 1080, "720": 720, "480": 480 } as const;
+type Res = keyof typeof RES;
 
-  const reset = () => {
-    setFile(null);
-    setResult(null);
-    setError(null);
-    setProgress(0);
-    setQuality("medium");
-    setResolution("original");
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
+export default function VideoCompressor() {
+  const [level, setLevel] = useState<Level>("balanced");
+  const [res, setRes] = useState<Res>("original");
+  const [audio, setAudio] = useState<"keep" | "compress" | "remove">("compress");
+  const media = useMediaFile("video");
+  const h = media.info?.height ?? 0;
 
-  const handleFile = (f: File | null) => {
-    if (!f) return;
-    if (!f.type.startsWith("video/")) {
-      setError("Please upload a valid video file.");
-      return;
-    }
-    setFile(f);
-    setError(null);
-    setResult(null);
-  };
-
-  const qualityOptions = [
-    { id: "low", label: "Low Quality", desc: "Smallest file", compression: "~70% smaller" },
-    { id: "medium", label: "Medium Quality", desc: "Balanced", compression: "~50% smaller" },
-    { id: "high", label: "High Quality", desc: "Best visual", compression: "~30% smaller" },
-  ];
-
-  const resolutionOptions = [
-    { id: "original", label: "Original", desc: "Keep resolution" },
-    { id: "1080", label: "1080p", desc: "Full HD" },
-    { id: "720", label: "720p", desc: "HD — faster" },
-    { id: "480", label: "480p", desc: "SD — fastest" },
-  ];
-
-  const handleCompress = async () => {
-    if (!file || !ffmpeg || !loaded) return;
-    setProcessing(true);
-    setProgress(0);
-    setError(null);
-    setResult(null);
-
-    const start = performance.now();
-    try {
-      const inputExt = file.name.substring(file.name.lastIndexOf(".")) || ".mp4";
-      const inputName = "input" + inputExt;
-      const outputName = "compressed" + inputExt;
-
-      await ffmpeg.writeFile(inputName, await fetchFile(file));
-
-      const crfMap: Record<string, string> = {
-        high: "28",
-        medium: "32",
-        low: "38",
-      };
-      const crf = crfMap[quality] || "32";
-
-      const scaleMap: Record<string, string> = {
-        "1080": "1920:-2",
-        "720": "1280:-2",
-        "480": "854:-2",
-      };
-
-      const args = ["-i", inputName];
-
-      if (resolution !== "original" && scaleMap[resolution]) {
-        args.push("-vf", `scale=${scaleMap[resolution]}`);
-      }
-
-      args.push(
-        "-c:v", "libx264",
-        "-crf", crf,
-        "-preset", "ultrafast",
-        "-c:a", "copy",
-        outputName
-      );
-
-      setOnProgress((p) => setProgress(p));
-      await ffmpeg.exec(args);
-
-      const data = await ffmpeg.readFile(outputName);
-      const blob = new Blob([new Uint8Array(data as unknown as ArrayBuffer)], {
-        type: file.type,
-      });
-      const url = URL.createObjectURL(blob);
-
-      setResult({
-        url,
-        originalSize: file.size,
-        compressedSize: blob.size,
-        reduction: Math.round((1 - blob.size / file.size) * 100),
-        time: (performance.now() - start) / 1000,
-      });
-
-      await ffmpeg.deleteFile(inputName);
-      await ffmpeg.deleteFile(outputName);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Compression failed");
-    } finally {
-      setProcessing(false);
-      setOnProgress(null);
-    }
+  const compress = () => {
+    if (!media.file) return;
+    const target = RES[res];
+    // Only ever scale down; -2 keeps aspect ratio and an even width.
+    const vf = target && h > target ? `scale=-2:${target}` : "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+    const a = audio === "remove" ? ["-an"] : audio === "keep" ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "96k"];
+    media.run({
+      args: (input) => ["-i", input, "-vf", vf, ...h264(LEVELS[level].crf, "veryfast"), ...a, ...FASTSTART, "compressed.mp4"],
+      output: "compressed.mp4",
+      mime: "video/mp4",
+      filename: `${stem(media.file)}-compressed.mp4`,
+    });
   };
 
   return (
     <ToolLayout toolId="video-compressor">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-4 order-last space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-4">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">
-                  Compression Level
-                </Label>
-                <div className="space-y-2">
-                  {qualityOptions.map((q) => (
-                    <button
-                      key={q.id}
-                      onClick={() => setQuality(q.id as typeof quality)}
-                      className={cn(
-                        "w-full p-3 rounded-xl border-2 transition-all text-left",
-                        quality === q.id
-                          ? "bg-primary border-primary text-primary-foreground shadow-md"
-                          : "bg-card border-border hover:border-primary/20 text-foreground"
-                      )}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-black">{q.label}</span>
-                      </div>
-                      <p className="text-[11px] opacity-70 leading-tight">{q.compression}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">
-                  Target Resolution
-                </Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {resolutionOptions.map((r) => (
-                    <button
-                      key={r.id}
-                      onClick={() => setResolution(r.id)}
-                      className={cn(
-                        "p-2.5 rounded-xl border-2 transition-all text-left",
-                        resolution === r.id
-                          ? "bg-primary border-primary text-primary-foreground shadow-md"
-                          : "bg-card border-border hover:border-primary/20 text-foreground"
-                      )}
-                    >
-                      <span className="text-sm font-black block">{r.label}</span>
-                      <span className="text-[10px] opacity-70">{r.desc}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-border/40 space-y-3">
-                <Button
-                  onClick={handleCompress}
-                  disabled={!file || processing || !loaded}
-                  className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-                >
-                  <Minimize2 className="w-5 h-5 mr-2" />
-                  Compress
-                </Button>
-                <Button variant="ghost" onClick={reset} className="w-full rounded-xl font-bold h-10">
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Reset
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">How It Works</h3>
-            </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Re-encodes with H.264 CRF presets. Lossless sources compress best. Audio is copied without re-encoding.
-            </p>
-          </div>
-        </div>
-
-        <div className="lg:col-span-8 order-first flex flex-col gap-6">
-          {!file && !result && (
-            <Card
-              className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[3rem] overflow-hidden min-h-[320px] flex flex-col items-center justify-center gap-6 cursor-pointer transition-all hover:border-primary/30 hover:shadow-primary/10"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="video/*"
-                className="hidden"
-                onChange={(e) => handleFile(e.target.files?.[0] || null)}
+      <MediaTool
+        media={media}
+        options={
+          <>
+            <Field label="Compression">
+              <ChoiceGrid cols={2} value={level} onChange={setLevel} options={(Object.keys(LEVELS) as Level[]).map((k) => ({ value: k, label: LEVELS[k].label, hint: LEVELS[k].hint }))} />
+            </Field>
+            <Field label="Max resolution">
+              <Segmented
+                size="sm"
+                value={res}
+                onChange={setRes}
+                options={(Object.keys(RES) as Res[]).map((k) => ({ value: k, label: k === "original" ? "Original" : `${k}p` }))}
               />
-              <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center">
-                <Upload className="w-8 h-8 text-primary" />
-              </div>
-              <div className="text-center space-y-2">
-                <p className="font-bold text-lg">Drop video file here</p>
-                <p className="text-sm text-muted-foreground">or click to browse</p>
-              </div>
-            </Card>
-          )}
-
-          {file && !result && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-8 flex items-center gap-5">
-                <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                  <Video className="w-7 h-7 text-primary" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm truncate">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatFileSize(file.size)} · {file.type.split("/")[1]?.toUpperCase() || "VIDEO"}
-                  </p>
-                </div>
-                {!processing && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={reset}
-                    className="rounded-xl h-10 w-10 text-destructive hover:bg-destructive/10"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {processing && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-12 flex flex-col items-center gap-6">
-                <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                <div className="text-center space-y-2">
-                  <p className="font-bold text-lg">Compressing video...</p>
-                  <p className="text-sm text-muted-foreground">{progress}% complete</p>
-                </div>
-                <div className="w-full max-w-md h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all duration-300"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {error && (
-            <div className="p-5 rounded-2xl bg-destructive/10 border border-destructive/20 text-destructive text-sm font-bold flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 shrink-0" />
-              {error}
-            </div>
-          )}
-
-          {result && (
-            <Card className="border-emerald-500/30 shadow-2xl shadow-emerald-500/10 bg-gradient-to-br from-emerald-500/10 to-primary/5 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-10 flex flex-col items-center gap-8">
-                <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                  <CheckCircle2 className="w-10 h-10 text-emerald-500" />
-                </div>
-                <div className="text-center space-y-1">
-                  <p className="text-2xl font-black">Compressed!</p>
-                  <p className="text-sm text-muted-foreground">
-                    {formatFileSize(result.originalSize)} → {formatFileSize(result.compressedSize)} · {result.reduction}% smaller · {result.time.toFixed(1)}s
-                  </p>
-                </div>
-                <div className="flex gap-3 w-full max-w-md">
-                  <Button
-                    onClick={() => {
-                      const a = document.createElement("a");
-                      a.href = result.url;
-                      const base = file?.name.split(".")[0] || "video";
-                      const ext = file?.name.substring(file.name.lastIndexOf(".")) || ".mp4";
-                      a.download = `${base}_compressed${ext}`;
-                      a.click();
-                    }}
-                    className="flex-1 h-14 rounded-2xl text-lg font-bold bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 transition-all"
-                  >
-                    <Download className="w-5 h-5 mr-2" />
-                    Download
-                  </Button>
-                  <Button variant="outline" onClick={reset} className="h-14 rounded-2xl font-bold px-6">
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    New
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
+            </Field>
+            <Field label="Audio">
+              <Segmented
+                size="sm"
+                value={audio}
+                onChange={setAudio}
+                options={[
+                  { value: "compress", label: "96 kbps" },
+                  { value: "keep", label: "Keep" },
+                  { value: "remove", label: "Remove" },
+                ]}
+              />
+            </Field>
+            <p className="text-[11px] text-muted-foreground">Outputs H.264 MP4. Lowering resolution saves the most; long videos can take a few minutes in the browser.</p>
+          </>
+        }
+        action={{ label: "Compress video", busyLabel: "Compressing", icon: <Minimize2 />, onClick: compress }}
+      />
     </ToolLayout>
   );
 }
