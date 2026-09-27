@@ -1,194 +1,128 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+import { Download } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  FileUp, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  Download,
-  Link,
-  Info,
-  ExternalLink,
-  Image as ImageIcon,
-  FileImage,
-  AlertCircle
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { ClearButton, CodeArea, Field, OptionsLayout, StatusBadge, ToolAlert, ToolPanel, formatBytes } from "@/components/tool";
+
+/** Recognises common formats from their first bytes, so data without a MIME prefix still works. */
+function sniff(b: Uint8Array): { mime: string; ext: string } {
+  const h = Array.from(b.slice(0, 12)).map((x) => x.toString(16).padStart(2, "0")).join("");
+  const ascii = new TextDecoder().decode(b.slice(0, 256));
+  if (h.startsWith("89504e47")) return { mime: "image/png", ext: "png" };
+  if (h.startsWith("ffd8ff")) return { mime: "image/jpeg", ext: "jpg" };
+  if (h.startsWith("47494638")) return { mime: "image/gif", ext: "gif" };
+  if (h.startsWith("52494646") && h.slice(16, 24) === "57454250") return { mime: "image/webp", ext: "webp" };
+  if (h.slice(8, 24) === "6674797061766966") return { mime: "image/avif", ext: "avif" };
+  if (h.startsWith("25504446")) return { mime: "application/pdf", ext: "pdf" };
+  if (h.startsWith("504b0304")) return { mime: "application/zip", ext: "zip" };
+  if (h.startsWith("494433") || h.startsWith("fffb")) return { mime: "audio/mpeg", ext: "mp3" };
+  if (h.startsWith("774f4646")) return { mime: "font/woff", ext: "woff" };
+  if (h.startsWith("774f4632")) return { mime: "font/woff2", ext: "woff2" };
+  if (h.startsWith("00000100")) return { mime: "image/x-icon", ext: "ico" };
+  if (/^\s*(<\?xml[^>]*>\s*)?<svg/i.test(ascii)) return { mime: "image/svg+xml", ext: "svg" };
+  if (/^\s*[{[]/.test(ascii)) return { mime: "application/json", ext: "json" };
+  return { mime: "application/octet-stream", ext: "bin" };
+}
+
+const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/svg+xml": "svg", "application/pdf": "pdf", "text/plain": "txt", "application/json": "json" };
+
+function decode(input: string): { bytes: Uint8Array; mime: string; ext: string } | { error: string } | null {
+  let s = input.trim();
+  if (!s) return null;
+  let declared: string | null = null;
+  const m = s.match(/^data:([^;,]+)?(?:;[^,]*)?,/);
+  if (m) {
+    declared = m[1] ?? null;
+    s = s.slice(m[0].length);
+  }
+  // Tolerate line breaks, URL-safe alphabet and missing padding.
+  s = s.replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(s)) return { error: "This isn't valid Base64 — it contains characters outside A–Z, a–z, 0–9, + and /." };
+  s = s.padEnd(Math.ceil(s.length / 4) * 4, "=");
+  try {
+    const bin = atob(s);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    const sniffed = sniff(bytes);
+    const mime = declared && declared !== "application/octet-stream" ? declared : sniffed.mime;
+    return { bytes, mime, ext: EXT[mime] ?? sniffed.ext };
+  } catch {
+    return { error: "Couldn't decode — the Base64 may be truncated." };
+  }
+}
 
 export default function Base64ImageToFile() {
   const [input, setInput] = useState("");
-  const [preview, setPreview] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [fileInfo, setFileInfo] = useState<{ type: string; size: number } | null>(null);
+  const [name, setName] = useState("decoded");
+  const r = useMemo(() => decode(input), [input]);
+  const ok = r && "bytes" in r ? r : null;
 
-  const processBase64 = (val: string) => {
-    setInput(val);
-    setError(null);
-    setPreview(null);
-    setFileInfo(null);
+  const url = useMemo(() => (ok ? URL.createObjectURL(new Blob([ok.bytes.slice()], { type: ok.mime })) : null), [ok]);
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
 
-    if (!val.trim()) return;
-
-    try {
-      let base64String = val.trim();
-      let mimeType = "image/png"; // Default
-
-      if (base64String.startsWith("data:")) {
-        const match = base64String.match(/^data:(.*?);base64,(.*)$/);
-        if (match) {
-          mimeType = match[1];
-          base64String = match[2];
-        }
-      }
-
-      // Validate base64
-      try {
-        atob(base64String);
-      } catch (e) {
-        throw new Error("Invalid Base64 string format.");
-      }
-
-      const fullDataUri = `data:${mimeType};base64,${base64String}`;
-      setPreview(fullDataUri);
-
-      // Estimate size
-      const binaryString = atob(base64String);
-      setFileInfo({
-        type: mimeType,
-        size: binaryString.length
-      });
-
-    } catch (e: any) {
-      setError(e.message || "Failed to process Base64 string.");
-    }
-  };
-
-  const downloadImage = () => {
-    if (!preview || !fileInfo) return;
-    const extension = fileInfo.type.split('/')[1] || 'png';
+  const download = () => {
+    if (!url || !ok) return;
     const a = document.createElement("a");
-    a.href = preview;
-    a.download = `exported-image-${Date.now()}.${extension}`;
-    document.body.appendChild(a);
+    a.href = url;
+    a.download = `${name || "decoded"}.${ok.ext}`;
     a.click();
-    document.body.removeChild(a);
   };
 
-  const formatSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    return `${(bytes / 1024).toFixed(2)} KB`;
-  };
+  const isImage = ok?.mime.startsWith("image/");
+  const text = ok && /^(text\/|application\/json)/.test(ok.mime) ? new TextDecoder().decode(ok.bytes.slice(0, 20000)) : null;
+
+  const options = (
+    <ToolPanel
+      title="File"
+      bodyClassName="p-3 space-y-3"
+      footer={
+        <Button size="lg" onClick={download} disabled={!ok} className="w-full">
+          <Download /> Download {ok ? `.${ok.ext}` : "file"}
+        </Button>
+      }
+    >
+      {ok ? (
+        <dl className="text-xs space-y-1">
+          <div className="flex justify-between"><dt className="text-muted-foreground">Type</dt><dd className="font-mono">{ok.mime}</dd></div>
+          <div className="flex justify-between"><dt className="text-muted-foreground">Size</dt><dd>{formatBytes(ok.bytes.length)}</dd></div>
+        </dl>
+      ) : (
+        <p className="text-xs text-muted-foreground">Paste Base64 or a data: URI. The file type is detected automatically.</p>
+      )}
+      <Field label="File name" htmlFor="fn">
+        <Input id="fn" value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="base64-image-to-file">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Input Side */}
-        <div className="lg:col-span-5 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col min-h-[400px]">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <Link className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Base64 String</span>
+      <OptionsLayout options={options}>
+        <ToolPanel title="Base64 input" actions={<>{ok && <StatusBadge tone="success">{ok.ext.toUpperCase()}</StatusBadge>}<ClearButton onClick={() => setInput("")} iconOnly disabled={!input} /></>}>
+          <CodeArea value={input} onChange={(e) => setInput(e.target.value)} minHeight={180} placeholder="data:image/png;base64,iVBORw0KGgo… or just the Base64 text" />
+        </ToolPanel>
+        {r && "error" in r && <ToolAlert tone="error">{r.error}</ToolAlert>}
+        {ok && url && (
+          <ToolPanel title="Preview">
+            {isImage ? (
+              <div className="p-4 flex justify-center bg-[conic-gradient(#0000000d_25%,transparent_0_50%,#0000000d_0_75%,transparent_0)] bg-[length:16px_16px]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={url} alt="Decoded" className="max-h-[50vh] max-w-full" />
               </div>
-              <Button variant="ghost" size="icon" onClick={() => processBase64("")} className="h-8 w-8 rounded-lg text-muted-foreground hover:text-destructive">
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </div>
-            <CardContent className="p-0 flex-1 relative">
-              <Textarea
-                placeholder="Paste your Base64 string here (with or without data URI prefix)..."
-                value={input}
-                onChange={(e) => processBase64(e.target.value)}
-                className="w-full h-full min-h-[350px] p-8 bg-transparent border-none focus-visible:ring-0 resize-none font-mono text-xs leading-relaxed break-all"
-              />
-            </CardContent>
-          </Card>
-
-          {error && (
-            <div className="p-6 rounded-[2rem] bg-destructive/5 border border-destructive/20 flex items-start gap-4 animate-in zoom-in-95">
-              <div className="w-12 h-12 rounded-2xl bg-destructive/10 flex items-center justify-center text-destructive shrink-0">
-                <AlertCircle className="w-6 h-6" />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-lg font-bold text-destructive">Process Error</h3>
-                <p className="text-xs font-mono text-destructive/80 leading-relaxed">
-                  {error}
-                </p>
-              </div>
-            </div>
-          )}
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Tool Info</h3>
-            </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              This tool automatically detects the MIME type from the Data URI. If no prefix is present, it defaults to PNG. All conversion happens entirely in your browser.
-            </p>
-          </div>
-        </div>
-
-        {/* Results Side */}
-        <div className="lg:col-span-7 h-full">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col min-h-[500px]">
-            <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <ImageIcon className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-primary">Image Preview</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={downloadImage}
-                disabled={!preview}
-                className={cn(
-                  "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                  preview && "text-green-500 hover:text-green-500"
-                )}
-              >
-                <Download className="w-4 h-4 mr-2" />
-                Download File
-              </Button>
-            </div>
-            <CardContent className="p-12 flex-1 flex flex-col items-center justify-center bg-primary/[0.01]">
-              {preview ? (
-                <div className="space-y-8 w-full flex flex-col items-center animate-in fade-in duration-500">
-                  <div className="relative group max-w-full max-h-[400px] rounded-2xl overflow-hidden shadow-2xl transition-all hover:scale-[1.02]">
-                    <img src={preview} alt="Decoded" className="max-w-full h-auto object-contain" />
-                    <div className="absolute inset-0 border-2 border-primary/5 rounded-2xl pointer-events-none" />
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4 w-full max-w-sm">
-                    <div className="p-4 rounded-2xl bg-muted/30 border border-border/20 text-center">
-                      <p className="text-[8px] font-black uppercase text-muted-foreground tracking-widest mb-1">Mime Type</p>
-                      <p className="text-sm font-bold text-primary">{fileInfo?.type}</p>
-                    </div>
-                    <div className="p-4 rounded-2xl bg-muted/30 border border-border/20 text-center">
-                      <p className="text-[8px] font-black uppercase text-muted-foreground tracking-widest mb-1">File Size</p>
-                      <p className="text-sm font-bold text-primary">{fileInfo ? formatSize(fileInfo.size) : '0 B'}</p>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center py-20 text-center opacity-30 gap-4">
-                  <ImageIcon className="w-20 h-20" />
-                  <p className="italic font-medium">Your image will appear here after pasting Base64 data...</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            ) : ok.mime === "application/pdf" ? (
+              <iframe src={url} title="PDF preview" className="w-full h-[60vh] bg-white" />
+            ) : ok.mime.startsWith("audio/") ? (
+              <div className="p-4"><audio src={url} controls className="w-full" /></div>
+            ) : text !== null ? (
+              <pre className="px-3.5 py-3 font-mono text-[12.5px] whitespace-pre-wrap break-all max-h-80 overflow-auto custom-scrollbar">{text}</pre>
+            ) : (
+              <p className="px-3.5 py-6 text-center text-xs text-muted-foreground">No preview for {ok.mime} — download to open it.</p>
+            )}
+          </ToolPanel>
+        )}
+      </OptionsLayout>
     </ToolLayout>
   );
 }

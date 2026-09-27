@@ -1,98 +1,112 @@
 "use client";
 
-import React, { useState } from "react";
+import { useMemo, useState } from "react";
+import { Clock } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
 import { Button } from "@/components/ui/button";
-import { Calendar, RotateCcw, Copy, Check, Info, Globe, Clock, Code, ClipboardList, ShieldCheck, Zap } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { CopyButton, OptionsLayout, ToolPanel } from "@/components/tool";
+import { useMounted } from "@/lib/local-store";
+
+const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+
+function localIso(d: Date) {
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? "+" : "-";
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}${sign}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`;
+}
+
+function isoWeek(d: Date) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day);
+  const y = t.getUTCFullYear();
+  const w = Math.ceil(((t.getTime() - Date.UTC(y, 0, 1)) / 86400000 + 1) / 7);
+  return `${y}-W${pad(w)}-${day}`;
+}
+
+function relative(d: Date, now: number) {
+  const s = Math.round((d.getTime() - now) / 1000);
+  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+  const a = Math.abs(s);
+  if (a < 60) return rtf.format(s, "second");
+  if (a < 3600) return rtf.format(Math.round(s / 60), "minute");
+  if (a < 86400) return rtf.format(Math.round(s / 3600), "hour");
+  if (a < 2592000) return rtf.format(Math.round(s / 86400), "day");
+  if (a < 31536000) return rtf.format(Math.round(s / 2592000), "month");
+  return rtf.format(Math.round(s / 31536000), "year");
+}
+
+/** Accepts ISO strings, RFC 2822, Unix seconds or milliseconds. */
+function parseInput(raw: string): Date | null {
+  const s = raw.trim();
+  if (!s) return null;
+  if (/^-?\d{9,11}$/.test(s)) return new Date(Number(s) * 1000);
+  if (/^-?\d{12,14}$/.test(s)) return new Date(Number(s));
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
 
 export default function ISOFormatter() {
-  const [inputDate, setInputDate] = useState<string>(new Date().toISOString());
-  const [copied, setCopied] = useState<string | null>(null);
+  // Output depends on the viewer's locale/zone/clock, so render on the client only.
+  const mounted = useMounted();
+  if (!mounted) return <ToolLayout toolId="iso-formatter"><div className="h-96 rounded-md border border-border bg-card" /></ToolLayout>;
+  return <Formatter />;
+}
 
-  const formats = [
-    { label: "ISO 8601 (Full)", fn: (d: Date) => d.toISOString(), desc: "Complete date and time in UTC", icon: <Globe className="w-4 h-4" /> },
-    { label: "ISO 8601 (YMD)", fn: (d: Date) => d.toISOString().split("T")[0], desc: "Date part only", icon: <Calendar className="w-4 h-4" /> },
-    { label: "Local ISO", fn: (d: Date) => { const offset = d.getTimezoneOffset(); const localDate = new Date(d.getTime() - offset * 60 * 1000); return localDate.toISOString().split(".")[0].replace("Z", ""); }, desc: "No timezone offset", icon: <Clock className="w-4 h-4" /> },
-    { label: "Localized String", fn: (d: Date) => d.toLocaleString(), desc: "User regional format", icon: <ClipboardList className="w-4 h-4" /> },
-    { label: "Short Date", fn: (d: Date) => d.toLocaleDateString(), desc: "Brief regional date", icon: <Calendar className="w-4 h-4" /> },
-    { label: "RFC 2822 / UTC", fn: (d: Date) => d.toUTCString(), desc: "HTTP/Email standard", icon: <Code className="w-4 h-4" /> },
-  ];
+function Formatter() {
+  const [input, setInput] = useState(() => new Date().toISOString());
+  const [now] = useState(() => Date.now());
+  const d = useMemo(() => parseInput(input), [input]);
 
-  const handleCopy = async (text: string, id: string) => {
-    try { await navigator.clipboard.writeText(text); setCopied(id); setTimeout(() => setCopied(null), 2000); } catch (err) { console.error(err); }
-  };
+  const rows: [string, string][] = d
+    ? [
+        ["ISO 8601 (UTC)", d.toISOString()],
+        ["ISO 8601 (local offset)", localIso(d)],
+        ["Date only", d.toISOString().slice(0, 10)],
+        ["ISO week date", isoWeek(d)],
+        ["RFC 2822", d.toUTCString().replace("GMT", "+0000")],
+        ["RFC 7231 (HTTP)", d.toUTCString()],
+        ["SQL datetime (UTC)", d.toISOString().replace("T", " ").slice(0, 19)],
+        ["Unix seconds", String(Math.floor(d.getTime() / 1000))],
+        ["Unix milliseconds", String(d.getTime())],
+        ["Local (long)", d.toLocaleString(undefined, { dateStyle: "full", timeStyle: "long" })],
+        ["Local (short)", d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })],
+        ["Relative", relative(d, now)],
+      ]
+    : [];
 
-  const isValidDate = (d: any) => d instanceof Date && !isNaN(d.getTime());
-  const parsedDate = new Date(inputDate);
-  const isDateError = !isValidDate(parsedDate);
-
-  const handleReset = () => { setInputDate(""); setCopied(null); };
-  const setNow = () => { setInputDate(new Date().toISOString()); };
+  const options = (
+    <ToolPanel title="Accepted input" bodyClassName="p-3 space-y-1.5 text-xs text-muted-foreground">
+      <p>ISO 8601 · RFC 2822 · “March 5 2026 14:00” · Unix seconds (10 digits) or milliseconds (13 digits).</p>
+      <p>Local formats use your browser&apos;s time zone ({Intl.DateTimeFormat().resolvedOptions().timeZone}).</p>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="iso-formatter">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        <div className="lg:col-span-4 lg:order-last space-y-6">
-          <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-sm">
-            <Button onClick={handleReset} variant="outline" className="w-full h-12 border-border hover:bg-accent text-muted-foreground hover:text-foreground font-bold uppercase tracking-widest text-xs">
-              <RotateCcw className="w-4 h-4 mr-2" /> Clear Input
-            </Button>
-            <Button onClick={setNow} className="w-full h-12 shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground font-bold uppercase tracking-widest text-xs rounded-xl">
-              <Zap className="w-4 h-4 mr-2" /> Use Now
-            </Button>
-          </div>
-          <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-sm">
-            <h3 className="text-sm font-bold text-foreground uppercase tracking-wide">About ISO 8601</h3>
-            <p className="text-xs text-muted-foreground leading-relaxed">ISO 8601 eliminates ambiguity by utilizing a standardized YYYY-MM-DD hierarchy, ensuring seamless data exchange across international boundaries.</p>
-          </div>
-        </div>
-
-        <div className="lg:col-span-8 space-y-6">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between px-2">
-              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Enter Date or Time</label>
-              {inputDate && !isDateError && <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest bg-emerald-50 px-2 py-0.5 rounded-full">Valid Date</span>}
-            </div>
-            <div className={`p-8 md:p-10 bg-card border-2 rounded-[2.5rem] transition-all flex flex-col md:flex-row items-center gap-8 ${isDateError && inputDate ? "border-red-100 bg-red-50/10" : "border-border shadow-sm focus-within:border-primary focus-within:shadow-2xl focus-within:shadow-primary/5"}`}>
-              <div className={`p-5 rounded-[2rem] hidden md:block ${isDateError && inputDate ? "bg-red-50 text-red-400" : "bg-muted text-primary"}`}><Calendar className="w-10 h-10" /></div>
-              <div className="flex-1 w-full">
-                <input type="text" value={inputDate} onChange={(e) => setInputDate(e.target.value)} className="w-full text-3xl md:text-4xl font-black text-foreground outline-none placeholder:text-muted-foreground bg-transparent text-center md:text-left" placeholder="2024-01-01 or 1704067200" />
-                {isDateError && inputDate && <p className="mt-3 text-xs font-bold text-red-500 flex items-center justify-center md:justify-start gap-2"><Info className="w-4 h-4" /> Invalid temporal format detected</p>}
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            <div className="flex items-center gap-4 px-2">
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">ISO 8601 Result</span>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {formats.map((f, index) => {
-                const result = !isDateError ? f.fn(parsedDate) : null;
-                return (
-                  <div key={f.label} className="bg-card p-6 md:p-8 rounded-[2.5rem] border border-border transition-all hover:border-border hover:shadow-xl hover:shadow-primary/5 group">
-                    <div className="flex items-center justify-between mb-6">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2.5 bg-muted rounded-xl text-muted-foreground group-hover:text-primary transition-colors">{f.icon}</div>
-                        <div><h4 className="text-sm font-black text-foreground uppercase tracking-tight group-hover:text-primary transition-colors">{f.label}</h4><p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">{f.desc}</p></div>
-                      </div>
-                      {result && (
-                        <button onClick={() => handleCopy(result, f.label)} className="p-3 bg-muted hover:bg-emerald-50 rounded-[1.25rem] text-muted-foreground hover:text-emerald-600 transition-all">
-                          {copied === f.label ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                        </button>
-                      )}
-                    </div>
-                    <div className="bg-muted p-5 rounded-2xl border border-border/50 group-hover:bg-card group-hover:border-border transition-all">
-                      <code className="text-lg font-mono font-bold text-foreground break-all leading-tight">{result || <span className="text-muted-foreground">Waiting for valid input...</span>}</code>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      </div>
+      <OptionsLayout options={options}>
+        <ToolPanel bodyClassName="p-3.5 flex gap-2">
+          <Input value={input} onChange={(e) => setInput(e.target.value)} spellCheck={false} className="h-11 font-mono" aria-invalid={input.trim() && !d ? true : undefined} />
+          <Button variant="outline" onClick={() => setInput(new Date().toISOString())} className="h-11">
+            <Clock /> Now
+          </Button>
+        </ToolPanel>
+        {input.trim() && !d && <p className="text-xs text-destructive px-0.5">Unrecognised date.</p>}
+        {d && (
+          <ToolPanel title="Formats">
+            <dl className="divide-y divide-border">
+              {rows.map(([k, v]) => (
+                <div key={k} className="group flex items-center gap-3 px-3.5 h-10">
+                  <dt className="w-44 shrink-0 text-xs text-muted-foreground">{k}</dt>
+                  <dd className="flex-1 font-mono text-[13px] truncate">{v}</dd>
+                  <CopyButton text={v} iconOnly className="opacity-0 group-hover:opacity-100 focus:opacity-100" />
+                </div>
+              ))}
+            </dl>
+          </ToolPanel>
+        )}
+      </OptionsLayout>
     </ToolLayout>
   );
 }

@@ -1,131 +1,116 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUpDown, Play, Square } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
 import { Button } from "@/components/ui/button";
-import { Waves, RotateCcw, Copy, Info, ArrowRightLeft, Check, ShieldCheck, Type, Radio } from "lucide-react";
+import { ClearButton, CodeArea, CopyButton, Segmented, SliderField, SplitLayout, ToolAlert, ToolPanel } from "@/components/tool";
+
+const MORSE: Record<string, string> = {
+  A: ".-", B: "-...", C: "-.-.", D: "-..", E: ".", F: "..-.", G: "--.", H: "....", I: "..", J: ".---", K: "-.-", L: ".-..", M: "--",
+  N: "-.", O: "---", P: ".--.", Q: "--.-", R: ".-.", S: "...", T: "-", U: "..-", V: "...-", W: ".--", X: "-..-", Y: "-.--", Z: "--..",
+  "0": "-----", "1": ".----", "2": "..---", "3": "...--", "4": "....-", "5": ".....", "6": "-....", "7": "--...", "8": "---..", "9": "----.",
+  ".": ".-.-.-", ",": "--..--", "?": "..--..", "'": ".----.", "!": "-.-.--", "/": "-..-.", "(": "-.--.", ")": "-.--.-", "&": ".-...",
+  ":": "---...", ";": "-.-.-.", "=": "-...-", "+": ".-.-.", "-": "-....-", _: "..--.-", '"': ".-..-.", $: "...-..-", "@": ".--.-.",
+};
+const REVERSE = Object.fromEntries(Object.entries(MORSE).map(([k, v]) => [v, k]));
+
+function toMorse(s: string) {
+  const unknown = new Set<string>();
+  const out = s
+    .toUpperCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => Array.from(w).map((c) => MORSE[c] ?? (unknown.add(c), "")).filter(Boolean).join(" "))
+    .join(" / ");
+  return { out, unknown: [...unknown] };
+}
+
+function fromMorse(s: string) {
+  const unknown = new Set<string>();
+  // Normalise lookalike characters people paste (•, ·, —, _).
+  const norm = s.replace(/[•·∙]/g, ".").replace(/[—–_−]/g, "-").trim();
+  const out = norm
+    .split(/\s*(?:\/|\|| {3,}|\n)\s*/)
+    .map((w) => w.split(/\s+/).filter(Boolean).map((c) => REVERSE[c] ?? (unknown.add(c), "�")).join(""))
+    .join(" ");
+  return { out, unknown: [...unknown] };
+}
 
 export default function MorseCodeConverter() {
-  const [input, setInput] = useState<string>("");
-  const [output, setOutput] = useState<string>("");
   const [mode, setMode] = useState<"toMorse" | "fromMorse">("toMorse");
-  const [copied, setCopied] = useState<boolean>(false);
-  const [error, setError] = useState<string>("");
+  const [input, setInput] = useState("SOS Hello world");
+  const [wpm, setWpm] = useState(18);
+  const [playing, setPlaying] = useState(false);
+  const ctxRef = useRef<AudioContext | null>(null);
 
-  const morseMap: Record<string, string> = {
-    'A': '.-', 'B': '-...', 'C': '-.-.', 'D': '-..', 'E': '.', 'F': '..-.',
-    'G': '--.', 'H': '....', 'I': '..', 'J': '.---', 'K': '-.-', 'L': '.-..',
-    'M': '--', 'N': '-.', 'O': '---', 'P': '.--.', 'Q': '--.-', 'R': '.-.',
-    'S': '...', 'T': '-', 'U': '..-', 'V': '...-', 'W': '.--', 'X': '-..-',
-    'Y': '-.--', 'Z': '--..', '1': '.----', '2': '..---', '3': '...--',
-    '4': '....-', '5': '.....', '6': '-....', '7': '--...', '8': '---..',
-    '9': '----.', '0': '-----', ' ': '/', '.': '.-.-.-', ',': '--..--',
-    '?': '..--..', "'": '.----.', '!': '-.-.--', '/': '-..-.', '(': '-.--.',
-    ')': '-.--.-', '&': '.-...', ':': '---...', ';': '-.-.-.', '=': '-...-',
-    '+': '.-.-.', '-': '-....-', '_': '..--.-', '"': '.-..-.', '$': '...-..-',
-    '@': '.--.-.'
+  const r = useMemo(() => (mode === "toMorse" ? toMorse(input) : fromMorse(input)), [input, mode]);
+  const morse = mode === "toMorse" ? r.out : input;
+
+  const stop = () => {
+    ctxRef.current?.close();
+    ctxRef.current = null;
+    setPlaying(false);
   };
+  useEffect(() => () => { ctxRef.current?.close(); }, []);
 
-  const reverseMorseMap: Record<string, string> = Object.entries(morseMap).reduce((acc, [char, code]) => ({ ...acc, [code]: char }), {});
-
-  useEffect(() => {
-    if (!input.trim()) { setOutput(""); setError(""); return; }
-    try {
-      if (mode === "toMorse") {
-        const chars = input.toUpperCase().split("");
-        const translated = chars.map(c => morseMap[c] || c).join(" ");
-        setOutput(translated);
-      } else {
-        const words = input.trim().split(" / ");
-        const translated = words.map(word => word.split(" ").map(code => reverseMorseMap[code] || "").join("")).join(" ");
-        setOutput(translated);
-      }
-      setError("");
-    } catch (e) { setError("Invalid format detected"); setOutput(""); }
-  }, [input, mode]);
-
-  const swapMode = () => {
-    const newMode = mode === "toMorse" ? "fromMorse" : "toMorse";
-    setMode(newMode); setInput(output); setOutput(input);
-  };
-
-  const handleCopy = async () => {
-    if (!output) return;
-    try { await navigator.clipboard.writeText(output); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (err) { console.error(err); }
+  // Schedules the whole message on the Web Audio clock (PARIS timing: dot = 1.2 / wpm s).
+  const play = () => {
+    stop();
+    const ctx = new AudioContext();
+    ctxRef.current = ctx;
+    const unit = 1.2 / wpm;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = 650;
+    gain.gain.value = 0;
+    osc.connect(gain).connect(ctx.destination);
+    let t = ctx.currentTime + 0.05;
+    for (const ch of morse) {
+      if (ch === "." || ch === "-") {
+        const d = ch === "." ? unit : unit * 3;
+        gain.gain.setTargetAtTime(0.4, t, 0.004);
+        gain.gain.setTargetAtTime(0, t + d, 0.004);
+        t += d + unit;
+      } else if (ch === " ") t += unit * 2;
+      else if (ch === "/") t += unit * 2;
+    }
+    osc.start();
+    osc.stop(t + 0.1);
+    osc.onended = () => { if (ctxRef.current === ctx) stop(); };
+    setPlaying(true);
   };
 
   return (
     <ToolLayout toolId="morse-code-converter">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        <div className="lg:col-span-4 lg:order-last space-y-6">
-          <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-sm">
-            <h3 className="text-sm font-bold text-foreground uppercase tracking-wide">Translator Mode</h3>
-            <div className="space-y-2">
-              {[{ id: "toMorse", label: "Text to Morse", icon: <Type className="w-4 h-4" /> }, { id: "fromMorse", label: "Morse to Text", icon: <Waves className="w-4 h-4" /> }].map((m) => (
-                <button key={m.id} onClick={() => { if (mode !== m.id) swapMode(); }} className={`w-full flex items-center justify-between p-3 rounded-xl border-2 transition-all ${mode === m.id ? "border-primary bg-primary/5 text-primary" : "border-border bg-card text-muted-foreground hover:border-border"}`}>
-                  <span className="text-sm font-bold">{m.label}</span>
-                  {mode === m.id && <div className="w-2 h-2 rounded-full bg-primary" />}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-sm">
-            <Button onClick={swapMode} className="w-full h-12 shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground font-bold uppercase tracking-widest text-xs rounded-xl">
-              <ArrowRightLeft className="w-4 h-4 mr-2" /> Swap Direction
-            </Button>
-            <Button onClick={() => { setInput(""); setOutput(""); setError(""); }} variant="outline" className="w-full h-12 border-border hover:bg-accent text-muted-foreground hover:text-foreground font-bold uppercase tracking-widest text-xs">
-              <RotateCcw className="w-4 h-4 mr-2" /> Reset All
-            </Button>
-          </div>
-          <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-sm">
-            <h3 className="text-sm font-bold text-foreground uppercase tracking-wide">Standard</h3>
-            <p className="text-xs text-muted-foreground leading-relaxed">This translator adheres to International Morse Code conventions, utilizing single spaces for character separation and forward slashes (/) for word boundaries.</p>
-          </div>
-        </div>
-
-        <div className="lg:col-span-8 space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between px-2">
-                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{mode === "toMorse" ? "Plain Text Input" : "Morse Code Input"}</label>
-                <span className="text-[10px] font-bold text-muted-foreground">{input.length} Chars</span>
-              </div>
-              <textarea value={input} onChange={(e) => setInput(e.target.value)} className="w-full min-h-[280px] p-6 bg-card border border-border rounded-[2.5rem] outline-none focus:border-primary transition-all text-lg font-medium text-foreground placeholder:text-muted-foreground resize-none shadow-sm" placeholder={mode === "toMorse" ? "Start typing..." : "... --- ..."} />
-            </div>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between px-2">
-                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Result</label>
-                {output && (
-                  <button onClick={handleCopy} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
-                    <span className="text-[10px] font-bold uppercase tracking-widest">{copied ? "Copied" : "Copy"}</span>
-                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
-                )}
-              </div>
-              <div className="w-full min-h-[280px] p-6 bg-gradient-to-br from-blue-600 to-indigo-800 text-primary-foreground rounded-[2.5rem] overflow-auto shadow-xl shadow-primary/20 relative">
-                {error ? (
-                  <div className="flex flex-col items-center justify-center min-h-[150px] gap-2"><Info className="w-8 h-8 text-red-400 opacity-50" /><p className="text-xs uppercase font-bold tracking-widest text-red-300">{error}</p></div>
-                ) : output ? (
-                  <p className={`text-2xl font-black tracking-widest leading-relaxed break-words relative z-10 ${mode === "toMorse" ? "font-mono" : ""}`}>{output}</p>
-                ) : (
-                  <div className="flex flex-col items-center justify-center min-h-[150px] opacity-10 gap-4 mt-8"><Waves className="w-16 h-16" /><p className="text-[10px] font-black uppercase tracking-[0.4em]">Awaiting signal...</p></div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center gap-4"><span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Morse Reference</span><div className="h-px flex-1 bg-border" /></div>
-            <div className="grid grid-cols-4 md:grid-cols-8 lg:grid-cols-12 gap-2">
-              {Object.entries(morseMap).filter(([k]) => k.length === 1 && /[A-Z0-9]/.test(k)).map(([char, code]) => (
-                <div key={char} className="flex flex-col items-center gap-1 group p-2 bg-card border border-border rounded-xl">
-                  <span className="text-[10px] font-bold text-muted-foreground group-hover:text-foreground transition-colors">{char}</span>
-                  <span className="text-xs font-mono font-bold text-muted-foreground bg-muted group-hover:bg-muted px-2 py-1 rounded-lg transition-colors">{code}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+      <div className="space-y-3">
+        <ToolPanel bodyClassName="p-3 flex flex-wrap items-end gap-4">
+          <Segmented
+            value={mode}
+            onChange={(m) => { setMode(m); setInput(r.out); }}
+            options={[
+              { value: "toMorse", label: "Text → Morse" },
+              { value: "fromMorse", label: "Morse → Text" },
+            ]}
+          />
+          <Button variant="outline" size="sm" onClick={() => { setMode(mode === "toMorse" ? "fromMorse" : "toMorse"); setInput(r.out); }}>
+            <ArrowUpDown /> Swap
+          </Button>
+          <SliderField label="Playback speed" value={wpm} onChange={setWpm} min={5} max={40} format={(v) => `${v} WPM`} className="w-48 ml-auto" />
+          <Button onClick={playing ? stop : play} disabled={!morse.trim()} variant={playing ? "outline" : "default"}>
+            {playing ? <Square /> : <Play />} {playing ? "Stop" : "Play sound"}
+          </Button>
+        </ToolPanel>
+        <SplitLayout>
+          <ToolPanel title={mode === "toMorse" ? "Text" : "Morse code"} actions={<ClearButton onClick={() => setInput("")} iconOnly disabled={!input} />}>
+            <CodeArea value={input} onChange={(e) => setInput(e.target.value)} minHeight={220} placeholder={mode === "toMorse" ? "Type text…" : "... --- ... / .... . .-.. .-.. ---"} />
+          </ToolPanel>
+          <ToolPanel title={mode === "toMorse" ? "Morse code" : "Text"} actions={<CopyButton text={r.out} iconOnly />}>
+            <CodeArea value={r.out} readOnly minHeight={220} />
+          </ToolPanel>
+        </SplitLayout>
+        {r.unknown.length > 0 && <ToolAlert tone="warning">No Morse equivalent for: {r.unknown.map((u) => `“${u}”`).join(" ")} — skipped.</ToolAlert>}
+        <p className="text-[11px] text-muted-foreground px-0.5">Letters are separated by spaces and words by “/”. When decoding, • · — and _ are accepted too.</p>
       </div>
     </ToolLayout>
   );

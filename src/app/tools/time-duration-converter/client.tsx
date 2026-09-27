@@ -1,121 +1,137 @@
 "use client";
 
-import React, { useState } from "react";
+import { useMemo, useState } from "react";
 import { ToolLayout } from "@/components/tool-layout";
-import { Button } from "@/components/ui/button";
-import { Clock, RotateCcw, Copy, Check, Zap, CalendarDays, Timer, Play, ArrowRightLeft, ShieldCheck, Info } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { CopyButton, OptionsLayout, StatusBadge, ToolPanel } from "@/components/tool";
+
+const UNITS: { key: string; label: string; s: number; aliases: string[] }[] = [
+  { key: "ms", label: "Milliseconds", s: 0.001, aliases: ["ms", "msec", "millisecond", "milliseconds"] },
+  { key: "s", label: "Seconds", s: 1, aliases: ["s", "sec", "secs", "second", "seconds"] },
+  { key: "min", label: "Minutes", s: 60, aliases: ["m", "min", "mins", "minute", "minutes"] },
+  { key: "h", label: "Hours", s: 3600, aliases: ["h", "hr", "hrs", "hour", "hours"] },
+  { key: "d", label: "Days", s: 86400, aliases: ["d", "day", "days"] },
+  { key: "wk", label: "Weeks", s: 604800, aliases: ["w", "wk", "week", "weeks"] },
+  { key: "mo", label: "Months (avg 30.44 d)", s: 2629746, aliases: ["mo", "month", "months"] },
+  { key: "yr", label: "Years (avg 365.25 d)", s: 31557600, aliases: ["y", "yr", "year", "years"] },
+];
+
+/**
+ * Parses "1h 30m", "90 min", "1.5 hours", "01:30:00", "2d 4h", or ISO 8601 "PT1H30M".
+ * Returns seconds or null.
+ */
+function parse(raw: string): number | null {
+  const s = raw.trim().toLowerCase();
+  if (!s) return null;
+  const iso = s.match(/^p(?:(\d+(?:\.\d+)?)y)?(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)w)?(?:(\d+(?:\.\d+)?)d)?(?:t(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?)?$/);
+  if (iso && s !== "p" && s !== "pt") {
+    const [, y, mo, w, d, h, m, sec] = iso.map((x) => Number(x) || 0);
+    return y * 31557600 + mo * 2629746 + w * 604800 + d * 86400 + h * 3600 + m * 60 + sec;
+  }
+  const clock = s.match(/^(?:(\d+):)?(\d{1,2}):(\d{1,2}(?:\.\d+)?)$/);
+  if (clock) return (Number(clock[1]) || 0) * 3600 + Number(clock[2]) * 60 + Number(clock[3]);
+  const re = /(-?\d+(?:\.\d+)?)\s*([a-z]+)?/g;
+  let total = 0;
+  let matched = false;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s))) {
+    const unit = m[2] ? UNITS.find((u) => u.aliases.includes(m![2])) : UNITS[1];
+    if (!unit) return null;
+    total += Number(m[1]) * unit.s;
+    matched = true;
+  }
+  return matched && s.replace(re, "").replace(/[\s,and]+/g, "") === "" ? total : null;
+}
+
+const fmt = (n: number) => (n === 0 ? "0" : Math.abs(n) < 1e-4 ? n.toExponential(3) : Number(n.toPrecision(10)).toLocaleString("en-US", { maximumFractionDigits: 6 }));
+
+function breakdown(total: number) {
+  const parts: string[] = [];
+  let r = Math.abs(total);
+  for (const [n, label] of [[86400, "d"], [3600, "h"], [60, "m"], [1, "s"]] as const) {
+    const q = Math.floor(r / n);
+    if (q) parts.push(`${q}${label}`);
+    r -= q * n;
+  }
+  if (r >= 0.001) parts.push(`${Math.round(r * 1000)}ms`);
+  return parts.join(" ") || "0s";
+}
+
+function isoDuration(total: number) {
+  let r = Math.abs(total);
+  const d = Math.floor(r / 86400); r -= d * 86400;
+  const h = Math.floor(r / 3600); r -= h * 3600;
+  const m = Math.floor(r / 60); r -= m * 60;
+  const s = Number(r.toFixed(3));
+  const t = `${h ? `${h}H` : ""}${m ? `${m}M` : ""}${s ? `${s}S` : ""}`;
+  return `P${d ? `${d}D` : ""}${t ? `T${t}` : ""}` === "P" ? "PT0S" : `P${d ? `${d}D` : ""}${t ? `T${t}` : ""}`;
+}
+
+function clock(total: number) {
+  const t = Math.abs(total);
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = t % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${s.toFixed(s % 1 ? 3 : 0).padStart(s % 1 ? 6 : 2, "0")}`;
+}
+
+const EXAMPLES = ["1h 30m", "90 min", "2.5 days", "01:45:30", "PT2H15M", "3 weeks", "10000 s"];
 
 export default function TimeDurationConverter() {
-  const [inputValue, setInputValue] = useState<string>("");
-  const [inputUnit, setInputUnit] = useState<string>("hour");
-  const [copied, setCopied] = useState<string | null>(null);
+  const [input, setInput] = useState("1h 30m");
+  const secs = useMemo(() => parse(input), [input]);
 
-  const units = [
-    { value: "millisecond", label: "Milliseconds", short: "ms", factor: 0.001, icon: <Zap className="w-4 h-4" /> },
-    { value: "second", label: "Seconds", short: "s", factor: 1, icon: <Timer className="w-4 h-4" /> },
-    { value: "minute", label: "Minutes", short: "m", factor: 60, icon: <Clock className="w-4 h-4" /> },
-    { value: "hour", label: "Hours", short: "h", factor: 3600, icon: <Clock className="w-4 h-4" /> },
-    { value: "day", label: "Days", short: "d", factor: 86400, icon: <CalendarDays className="w-4 h-4" /> },
-    { value: "week", label: "Weeks", short: "w", factor: 604800, icon: <CalendarDays className="w-4 h-4" /> },
-    { value: "month", label: "Months (Avg)", short: "mo", factor: 2629746, icon: <CalendarDays className="w-4 h-4" /> },
-    { value: "year", label: "Years (Avg)", short: "y", factor: 31557600, icon: <CalendarDays className="w-4 h-4" /> },
-  ];
+  const formats: [string, string][] = secs === null ? [] : [["Human", breakdown(secs)], ["HH:MM:SS", clock(secs)], ["ISO 8601", isoDuration(secs)], ["Seconds", fmt(secs)], ["Milliseconds", fmt(secs * 1000)]];
 
-  const getResults = () => {
-    const val = parseFloat(inputValue);
-    if (isNaN(val) || !inputValue) return [];
-    const currentUnit = units.find(u => u.value === inputUnit);
-    if (!currentUnit) return [];
-    const seconds = val * currentUnit.factor;
-    return units.map(unit => {
-      let result = seconds / unit.factor;
-      let formattedResult;
-      if (result === 0) formattedResult = "0";
-      else if (Math.abs(result) < 0.000001) formattedResult = result.toExponential(4);
-      else if (result % 1 === 0) formattedResult = result.toString();
-      else formattedResult = result.toLocaleString(undefined, { maximumFractionDigits: 4 });
-      return { ...unit, result: formattedResult };
-    });
-  };
-
-  const handleCopy = async (text: string, id: string) => {
-    try { await navigator.clipboard.writeText(text); setCopied(id); setTimeout(() => setCopied(null), 2000); } catch (err) { console.error(err); }
-  };
-
-  const results = getResults();
+  const options = (
+    <ToolPanel title="Examples" bodyClassName="p-2 flex flex-wrap gap-1">
+      {EXAMPLES.map((e) => (
+        <button key={e} type="button" onClick={() => setInput(e)} className="h-7 px-2.5 rounded-md border border-border font-mono text-xs text-muted-foreground hover:text-foreground hover:bg-muted">
+          {e}
+        </button>
+      ))}
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="time-duration-converter">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        <div className="lg:col-span-4 lg:order-last space-y-6">
-          <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-sm">
-            <Button onClick={() => { setInputValue(""); setCopied(null); }} variant="outline" className="w-full h-12 border-border hover:bg-accent text-muted-foreground hover:text-foreground font-bold uppercase tracking-widest text-xs">
-              <RotateCcw className="w-4 h-4 mr-2" /> Reset All
-            </Button>
-          </div>
-          <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-sm">
-            <h3 className="text-sm font-bold text-foreground uppercase tracking-wide">Entry Unit</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {units.map(u => (
-                <button key={u.value} onClick={() => setInputUnit(u.value)} className={`p-2 rounded-xl border-2 text-[10px] font-bold uppercase tracking-wider transition-all ${inputUnit === u.value ? "border-primary bg-primary/5 text-primary" : "border-border bg-card text-muted-foreground hover:border-border"}`}>{u.label}</button>
-              ))}
-            </div>
-          </div>
-          <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-sm">
-            <h3 className="text-sm font-bold text-foreground uppercase tracking-wide">Calculation Base</h3>
-            <p className="text-xs text-muted-foreground leading-relaxed">Months are averaged at 30.44 days and years at 365.24 days to account for leap years and month variability.</p>
-          </div>
-        </div>
+      <OptionsLayout options={options}>
+        <ToolPanel bodyClassName="p-3.5 space-y-1.5">
+          <Input value={input} onChange={(e) => setInput(e.target.value)} placeholder="e.g. 2h 15m, 90 minutes, 01:30:00, PT1H30M" className="h-12 text-lg font-mono" autoFocus aria-invalid={input.trim() && secs === null ? true : undefined} />
+          <p className="text-[11px] text-muted-foreground">Mix units freely (“1 day 3h”), or use a clock time or ISO 8601 duration.</p>
+          {input.trim() && secs === null && <p className="text-xs text-destructive">Couldn&apos;t understand that duration.</p>}
+        </ToolPanel>
 
-        <div className="lg:col-span-8 space-y-6">
-          <div className="p-8 md:p-10 bg-card border border-border rounded-[2.5rem] shadow-sm transition-all focus-within:shadow-2xl focus-within:shadow-primary/5 relative overflow-hidden group">
-            <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none group-hover:opacity-10 transition-opacity"><Timer className="w-48 h-48 text-primary" /></div>
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_240px] gap-10 items-center relative z-10">
-              <div className="space-y-3">
-                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Time Duration</label>
-                <div className="flex items-center gap-4">
-                  <input type="number" value={inputValue} onChange={(e) => setInputValue(e.target.value)} placeholder="Enter duration..." className="w-full text-5xl md:text-6xl font-black text-foreground outline-none placeholder:text-muted-foreground bg-transparent px-2" />
-                </div>
-              </div>
-              <div className="space-y-3">
-                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Temporal Unit</label>
-                <div className="relative">
-                  <select value={inputUnit} onChange={(e) => setInputUnit(e.target.value)} className="w-full h-16 px-6 bg-muted border-2 border-border rounded-2xl text-lg font-bold text-foreground outline-none focus:bg-card focus:border-primary transition-all appearance-none cursor-pointer">
-                    {units.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
-                  </select>
-                  <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground"><ArrowRightLeft className="w-5 h-5 rotate-90" /></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            <div className="flex items-center gap-4 px-2"><span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Equivalent Durations</span><div className="h-px flex-1 bg-border" /></div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {results.length > 0 ? results.map((res) => (
-                <div key={res.value} className={`p-6 rounded-[2.5rem] border-2 transition-all relative overflow-hidden ${res.value === inputUnit ? "bg-primary border-primary shadow-xl shadow-primary/30" : "bg-card border-border hover:border-border hover:shadow-lg hover:shadow-primary/5"}`}>
-                  <div className="flex items-center justify-between mb-4 relative z-10">
-                    <div className="flex items-center gap-2">
-                      <div className={`p-2 rounded-xl ${res.value === inputUnit ? "bg-card/20 text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{res.icon}</div>
-                      <span className={`text-[10px] font-bold uppercase tracking-widest ${res.value === inputUnit ? "text-primary-foreground" : "text-muted-foreground"}`}>{res.label}</span>
-                    </div>
-                    <button onClick={() => handleCopy(res.result, res.value)} className={`p-2 rounded-xl transition-all ${res.value === inputUnit ? "hover:bg-card/20 text-primary-foreground" : "hover:bg-muted text-muted-foreground"}`}>{copied === res.value ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}</button>
+        {secs !== null && (
+          <>
+            <ToolPanel title="Formats" actions={<StatusBadge>{breakdown(secs)}</StatusBadge>}>
+              <dl className="divide-y divide-border">
+                {formats.map(([k, v]) => (
+                  <div key={k} className="group flex items-center gap-3 px-3.5 h-10">
+                    <dt className="w-32 shrink-0 text-xs text-muted-foreground">{k}</dt>
+                    <dd className="flex-1 font-mono text-[13px] truncate">{v}</dd>
+                    <CopyButton text={v} iconOnly className="opacity-0 group-hover:opacity-100 focus:opacity-100" />
                   </div>
-                  <div className="relative z-10">
-                    <p className={`text-2xl font-black whitespace-nowrap leading-tight ${res.value === inputUnit ? "text-primary-foreground" : "text-foreground"}`}>{res.result}</p>
-                    <p className={`text-[10px] font-bold mt-1 uppercase tracking-tighter ${res.value === inputUnit ? "text-primary-foreground/70" : "text-muted-foreground"}`}>Total {res.short}</p>
-                  </div>
-                </div>
-              )) : (
-                <div className="col-span-full py-20 flex flex-col items-center justify-center bg-muted rounded-[3rem] border-2 border-dashed border-border text-muted-foreground">
-                  <Clock className="w-16 h-16 mb-6 opacity-20" />
-                  <p className="text-xs font-black uppercase tracking-[0.3em]">Temporal matrix awaiting input</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+                ))}
+              </dl>
+            </ToolPanel>
+            <ToolPanel title="In each unit">
+              <ul className="grid sm:grid-cols-2 divide-y divide-border">
+                {UNITS.map((u) => {
+                  const v = fmt(secs / u.s);
+                  return (
+                    <li key={u.key} className="group flex items-center gap-3 px-3.5 h-10">
+                      <span className="flex-1 font-mono text-[13px] tabular-nums truncate">{v}</span>
+                      <span className="text-xs text-muted-foreground">{u.label}</span>
+                      <CopyButton text={v.replace(/,/g, "")} iconOnly className="opacity-0 group-hover:opacity-100 focus:opacity-100" />
+                    </li>
+                  );
+                })}
+              </ul>
+            </ToolPanel>
+          </>
+        )}
+      </OptionsLayout>
     </ToolLayout>
   );
 }

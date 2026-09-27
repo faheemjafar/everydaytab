@@ -1,266 +1,257 @@
 "use client";
 
+import { useMemo, useState } from "react";
+import { ArrowLeftRight } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { 
-  Ruler, 
-  Weight, 
-  Thermometer, 
-  Database, 
-  ArrowRightLeft, 
-  Copy, 
-  Check,
-  Zap,
-  Info,
-  Scale
-} from "lucide-react";
+import { CopyButton, OptionsLayout, ToolPanel } from "@/components/tool";
 import { cn } from "@/lib/utils";
 
-const conversions = {
+type Unit = { name: string; symbol: string; factor?: number; to?: (v: number) => number; from?: (v: number) => number };
+type Category = { label: string; units: Record<string, Unit> };
+
+// Factors convert to the category's base unit (first entry).
+const CATEGORIES: Record<string, Category> = {
   length: {
     label: "Length",
-    icon: Ruler,
-    base: "m",
     units: {
-      m: { name: "Meters", factor: 1 },
-      km: { name: "Kilometers", factor: 1000 },
-      cm: { name: "Centimeters", factor: 0.01 },
-      mm: { name: "Millimeters", factor: 0.001 },
-      mi: { name: "Miles", factor: 1609.344 },
-      yd: { name: "Yards", factor: 0.9144 },
-      ft: { name: "Feet", factor: 0.3048 },
-      in: { name: "Inches", factor: 0.0254 },
+      m: { name: "Metre", symbol: "m", factor: 1 },
+      km: { name: "Kilometre", symbol: "km", factor: 1000 },
+      cm: { name: "Centimetre", symbol: "cm", factor: 0.01 },
+      mm: { name: "Millimetre", symbol: "mm", factor: 0.001 },
+      um: { name: "Micrometre", symbol: "µm", factor: 1e-6 },
+      mi: { name: "Mile", symbol: "mi", factor: 1609.344 },
+      yd: { name: "Yard", symbol: "yd", factor: 0.9144 },
+      ft: { name: "Foot", symbol: "ft", factor: 0.3048 },
+      in: { name: "Inch", symbol: "in", factor: 0.0254 },
+      nmi: { name: "Nautical mile", symbol: "nmi", factor: 1852 },
     },
   },
   weight: {
     label: "Weight",
-    icon: Scale,
-    base: "kg",
     units: {
-      kg: { name: "Kilograms", factor: 1 },
-      g: { name: "Grams", factor: 0.001 },
-      mg: { name: "Milligrams", factor: 0.000001 },
-      lb: { name: "Pounds", factor: 0.453592 },
-      oz: { name: "Ounces", factor: 0.0283495 },
+      kg: { name: "Kilogram", symbol: "kg", factor: 1 },
+      g: { name: "Gram", symbol: "g", factor: 0.001 },
+      mg: { name: "Milligram", symbol: "mg", factor: 1e-6 },
+      t: { name: "Tonne", symbol: "t", factor: 1000 },
+      lb: { name: "Pound", symbol: "lb", factor: 0.45359237 },
+      oz: { name: "Ounce", symbol: "oz", factor: 0.028349523125 },
+      st: { name: "Stone", symbol: "st", factor: 6.35029318 },
+      ton: { name: "US ton", symbol: "ton", factor: 907.18474 },
     },
   },
   temperature: {
     label: "Temperature",
-    icon: Thermometer,
-    base: "c",
     units: {
-      c: { name: "Celsius", factor: 1 },
-      f: { name: "Fahrenheit", factor: 1 },
-      k: { name: "Kelvin", factor: 1 },
+      c: { name: "Celsius", symbol: "°C", to: (v) => v, from: (v) => v },
+      f: { name: "Fahrenheit", symbol: "°F", to: (v) => ((v - 32) * 5) / 9, from: (v) => (v * 9) / 5 + 32 },
+      k: { name: "Kelvin", symbol: "K", to: (v) => v - 273.15, from: (v) => v + 273.15 },
+      r: { name: "Rankine", symbol: "°R", to: (v) => ((v - 491.67) * 5) / 9, from: (v) => ((v + 273.15) * 9) / 5 },
+    },
+  },
+  area: {
+    label: "Area",
+    units: {
+      m2: { name: "Square metre", symbol: "m²", factor: 1 },
+      km2: { name: "Square kilometre", symbol: "km²", factor: 1e6 },
+      cm2: { name: "Square centimetre", symbol: "cm²", factor: 1e-4 },
+      ha: { name: "Hectare", symbol: "ha", factor: 1e4 },
+      ac: { name: "Acre", symbol: "ac", factor: 4046.8564224 },
+      ft2: { name: "Square foot", symbol: "ft²", factor: 0.09290304 },
+      in2: { name: "Square inch", symbol: "in²", factor: 0.00064516 },
+      mi2: { name: "Square mile", symbol: "mi²", factor: 2589988.110336 },
+    },
+  },
+  volume: {
+    label: "Volume",
+    units: {
+      l: { name: "Litre", symbol: "L", factor: 1 },
+      ml: { name: "Millilitre", symbol: "mL", factor: 0.001 },
+      m3: { name: "Cubic metre", symbol: "m³", factor: 1000 },
+      gal: { name: "US gallon", symbol: "gal", factor: 3.785411784 },
+      qt: { name: "US quart", symbol: "qt", factor: 0.946352946 },
+      cup: { name: "US cup", symbol: "cup", factor: 0.2365882365 },
+      floz: { name: "US fluid ounce", symbol: "fl oz", factor: 0.0295735295625 },
+      tbsp: { name: "Tablespoon", symbol: "tbsp", factor: 0.01478676478125 },
+      tsp: { name: "Teaspoon", symbol: "tsp", factor: 0.00492892159375 },
+      ukgal: { name: "Imperial gallon", symbol: "imp gal", factor: 4.54609 },
+    },
+  },
+  speed: {
+    label: "Speed",
+    units: {
+      mps: { name: "Metre/second", symbol: "m/s", factor: 1 },
+      kmh: { name: "Kilometre/hour", symbol: "km/h", factor: 1 / 3.6 },
+      mph: { name: "Mile/hour", symbol: "mph", factor: 0.44704 },
+      kn: { name: "Knot", symbol: "kn", factor: 1852 / 3600 },
+      fps: { name: "Foot/second", symbol: "ft/s", factor: 0.3048 },
+    },
+  },
+  time: {
+    label: "Time",
+    units: {
+      s: { name: "Second", symbol: "s", factor: 1 },
+      ms: { name: "Millisecond", symbol: "ms", factor: 0.001 },
+      min: { name: "Minute", symbol: "min", factor: 60 },
+      h: { name: "Hour", symbol: "h", factor: 3600 },
+      d: { name: "Day", symbol: "d", factor: 86400 },
+      wk: { name: "Week", symbol: "wk", factor: 604800 },
+      mo: { name: "Month (avg)", symbol: "mo", factor: 2629746 },
+      yr: { name: "Year (avg)", symbol: "yr", factor: 31556952 },
     },
   },
   data: {
-    label: "Digital Data",
-    icon: Database,
-    base: "b",
+    label: "Data",
     units: {
-      b: { name: "Bytes", factor: 1 },
-      kb: { name: "Kilobytes", factor: 1024 },
-      mb: { name: "Megabytes", factor: 1048576 },
-      gb: { name: "Gigabytes", factor: 1073741824 },
-      tb: { name: "Terabytes", factor: 1099511627776 },
+      B: { name: "Byte", symbol: "B", factor: 1 },
+      bit: { name: "Bit", symbol: "bit", factor: 0.125 },
+      kB: { name: "Kilobyte (1000)", symbol: "kB", factor: 1e3 },
+      MB: { name: "Megabyte (1000²)", symbol: "MB", factor: 1e6 },
+      GB: { name: "Gigabyte (1000³)", symbol: "GB", factor: 1e9 },
+      TB: { name: "Terabyte (1000⁴)", symbol: "TB", factor: 1e12 },
+      KiB: { name: "Kibibyte (1024)", symbol: "KiB", factor: 1024 },
+      MiB: { name: "Mebibyte (1024²)", symbol: "MiB", factor: 1024 ** 2 },
+      GiB: { name: "Gibibyte (1024³)", symbol: "GiB", factor: 1024 ** 3 },
+      TiB: { name: "Tebibyte (1024⁴)", symbol: "TiB", factor: 1024 ** 4 },
+    },
+  },
+  pressure: {
+    label: "Pressure",
+    units: {
+      pa: { name: "Pascal", symbol: "Pa", factor: 1 },
+      kpa: { name: "Kilopascal", symbol: "kPa", factor: 1000 },
+      bar: { name: "Bar", symbol: "bar", factor: 1e5 },
+      psi: { name: "PSI", symbol: "psi", factor: 6894.757293168 },
+      atm: { name: "Atmosphere", symbol: "atm", factor: 101325 },
+      mmhg: { name: "mmHg", symbol: "mmHg", factor: 133.322387415 },
+    },
+  },
+  energy: {
+    label: "Energy",
+    units: {
+      j: { name: "Joule", symbol: "J", factor: 1 },
+      kj: { name: "Kilojoule", symbol: "kJ", factor: 1000 },
+      cal: { name: "Calorie", symbol: "cal", factor: 4.184 },
+      kcal: { name: "Kilocalorie", symbol: "kcal", factor: 4184 },
+      wh: { name: "Watt-hour", symbol: "Wh", factor: 3600 },
+      kwh: { name: "Kilowatt-hour", symbol: "kWh", factor: 3.6e6 },
+      btu: { name: "BTU", symbol: "BTU", factor: 1055.05585262 },
+    },
+  },
+  angle: {
+    label: "Angle",
+    units: {
+      deg: { name: "Degree", symbol: "°", factor: 1 },
+      rad: { name: "Radian", symbol: "rad", factor: 180 / Math.PI },
+      grad: { name: "Gradian", symbol: "gon", factor: 0.9 },
+      turn: { name: "Turn", symbol: "tr", factor: 360 },
+      arcmin: { name: "Arcminute", symbol: "′", factor: 1 / 60 },
     },
   },
 };
+type CatKey = keyof typeof CATEGORIES;
+
+function convert(v: number, from: Unit, to: Unit) {
+  const base = from.to ? from.to(v) : v * (from.factor ?? 1);
+  return to.from ? to.from(base) : base / (to.factor ?? 1);
+}
+
+/** Up to 10 significant digits, no float noise, scientific only for extremes. */
+function fmt(n: number) {
+  if (!Number.isFinite(n)) return "—";
+  if (n === 0) return "0";
+  const a = Math.abs(n);
+  if (a >= 1e15 || a < 1e-9) return n.toExponential(6).replace(/\.?0+e/, "e");
+  return Number(n.toPrecision(10)).toLocaleString("en-US", { maximumFractionDigits: 10, useGrouping: true });
+}
 
 export default function UnitConverter() {
-  const [category, setCategory] = useState<keyof typeof conversions>("length");
+  const [cat, setCat] = useState<CatKey>("length");
   const [value, setValue] = useState("1");
-  const [fromUnit, setFromUnit] = useState("m");
-  const [toUnit, setToUnit] = useState("km");
-  const [copied, setCopied] = useState<string | null>(null);
+  const [from, setFrom] = useState("m");
+  const [to, setTo] = useState("ft");
 
-  const units = conversions[category].units;
+  const units = CATEGORIES[cat].units;
+  const num = parseFloat(value.replace(/,/g, ""));
+  const result = Number.isFinite(num) ? convert(num, units[from], units[to]) : NaN;
 
-  const performConversion = (val: string, from: string, to: string): string => {
-    const num = parseFloat(val);
-    if (isNaN(num)) return "";
+  const all = useMemo(() => (Number.isFinite(num) ? Object.entries(units).map(([k, u]) => ({ k, u, v: convert(num, units[from], u) })) : []), [num, units, from]);
 
-    if (category === "temperature") {
-      if (from === to) return val;
-      let celsius: number;
-      if (from === "c") celsius = num;
-      else if (from === "f") celsius = (num - 32) * (5 / 9);
-      else celsius = num - 273.15;
-      
-      if (to === "c") return celsius.toFixed(4);
-      else if (to === "f") return ((celsius * 9 / 5) + 32).toFixed(4);
-      else return (celsius + 273.15).toFixed(4);
-    }
-
-    const fromFactor = (units as any)[from].factor;
-    const toFactor = (units as any)[to].factor;
-    const baseValue = num * fromFactor;
-    const result = baseValue / toFactor;
-    
-    return result.toString().includes('.') ? result.toFixed(6).replace(/\.?0+$/, '') : result.toString();
+  const pickCat = (c: CatKey) => {
+    const keys = Object.keys(CATEGORIES[c].units);
+    setCat(c);
+    setFrom(keys[0]);
+    setTo(keys[1]);
   };
 
-  const currentResult = performConversion(value, fromUnit, toUnit);
+  const select = (val: string, set: (v: string) => void, id: string) => (
+    <select id={id} value={val} onChange={(e) => set(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-2 text-sm dark:bg-input/30">
+      {Object.entries(units).map(([k, u]) => (
+        <option key={k} value={k}>
+          {u.name} ({u.symbol})
+        </option>
+      ))}
+    </select>
+  );
 
-  const allConversions = useMemo(() => {
-    return Object.entries(units).map(([key, unit]) => ({
-      key,
-      name: unit.name,
-      value: performConversion(value, fromUnit, key)
-    }));
-  }, [value, fromUnit, units, category]);
-
-  const swapUnits = () => {
-    setFromUnit(toUnit);
-    setToUnit(fromUnit);
-  };
-
-  const copy = (val: string, id: string) => {
-    navigator.clipboard.writeText(val);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
-  };
+  const options = (
+    <ToolPanel title="Category" bodyClassName="p-1.5">
+      <div className="grid grid-cols-3 lg:grid-cols-1 gap-0.5">
+        {(Object.keys(CATEGORIES) as CatKey[]).map((c) => (
+          <button key={c} type="button" onClick={() => pickCat(c)} className={cn("h-8 px-2.5 rounded-md text-left text-[13px] transition-colors", c === cat ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+            {CATEGORIES[c].label}
+          </button>
+        ))}
+      </div>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="unit-converter">
-
-      <div className="flex flex-wrap gap-3 p-1.5 bg-muted/50 rounded-2xl border border-border/50 w-fit">
-        {(Object.entries(conversions) as [keyof typeof conversions, any][]).map(([key, data]) => (
-          <Button
-            key={key}
-            variant={category === key ? "default" : "ghost"}
-            size="sm"
-            onClick={() => {
-              setCategory(key);
-              const unitKeys = Object.keys(data.units);
-              setFromUnit(unitKeys[0]);
-              setToUnit(unitKeys[1]);
-            }}
-            className={cn(
-              "rounded-xl font-bold px-6",
-              category === key && "shadow-lg shadow-primary/20"
-            )}
-          >
-            <data.icon className="w-4 h-4 mr-2" />
-            {data.label}
-          </Button>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-5 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-4">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">From</Label>
-                <div className="flex gap-2">
-                  <Input 
-                    type="number" value={value} onChange={(e) => setValue(e.target.value)}
-                    className="h-16 px-6 rounded-2xl bg-muted/30 border-transparent focus:border-primary/20 text-2xl font-mono flex-1" 
-                  />
-                  <select 
-                    value={fromUnit} onChange={(e) => setFromUnit(e.target.value)}
-                    className="h-16 px-4 rounded-2xl bg-muted/50 border border-border/40 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  >
-                    {Object.entries(units).map(([key, unit]) => (
-                      <option key={key} value={key}>{unit.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex justify-center relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-border/40" />
-                </div>
-                <Button 
-                  variant="outline" size="icon" onClick={swapUnits}
-                  className="relative w-10 h-10 rounded-full bg-background border-border/40 text-muted-foreground z-10 shadow-sm hover:text-primary hover:border-primary/20 transition-all"
-                >
-                  <ArrowRightLeft className="w-4 h-4 rotate-90" />
-                </Button>
-              </div>
-
-              <div className="space-y-4">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">To</Label>
-                <div className="flex gap-2">
-                  <div className="h-16 px-6 rounded-2xl bg-primary/5 border border-primary/10 flex items-center flex-1">
-                    <span className="text-2xl font-mono font-bold text-primary truncate">{currentResult || "0"}</span>
-                  </div>
-                  <select 
-                    value={toUnit} onChange={(e) => setToUnit(e.target.value)}
-                    className="h-16 px-4 rounded-2xl bg-muted/50 border border-border/40 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  >
-                    {Object.entries(units).map(([key, unit]) => (
-                      <option key={key} value={key}>{unit.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <Button 
-                onClick={() => copy(currentResult, 'main')} disabled={!currentResult}
-                className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-              >
-                {copied === 'main' ? <Check className="w-5 h-5 mr-2" /> : <Copy className="w-5 h-5 mr-2" />}
-                {copied === 'main' ? "Result Copied!" : "Copy Result"}
-              </Button>
-            </CardContent>
-          </Card>
-
-          <div className="bg-primary/5 rounded-3xl p-6 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Info className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Quick Tip</h3>
+      <OptionsLayout options={options}>
+        <ToolPanel bodyClassName="p-3.5">
+          <div className="grid gap-3 md:grid-cols-[1fr_auto_1fr] items-end">
+            <div className="space-y-1.5">
+              <label htmlFor="uv" className="text-xs font-medium">From</label>
+              <Input id="uv" value={value} onChange={(e) => setValue(e.target.value)} inputMode="decimal" className="h-12 text-xl font-mono tabular-nums" autoFocus />
+              {select(from, setFrom, "uf")}
             </div>
-            <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Calculations are performed instantly using precise conversion factors. Results are rounded to 6 decimal places for maximum accuracy.
-            </p>
+            <Button variant="outline" size="icon" onClick={() => { setFrom(to); setTo(from); }} aria-label="Swap units" className="justify-self-center mb-11">
+              <ArrowLeftRight />
+            </Button>
+            <div className="space-y-1.5">
+              <span className="text-xs font-medium">To</span>
+              <div className="flex items-center h-12 px-3 rounded-md border border-border bg-muted/40 text-xl font-mono tabular-nums">
+                <span className="flex-1 truncate">{fmt(result)}</span>
+                <CopyButton text={Number.isFinite(result) ? String(Number(result.toPrecision(12))) : ""} iconOnly />
+              </div>
+              {select(to, setTo, "ut")}
+            </div>
           </div>
-        </div>
+          {Number.isFinite(result) && (
+            <p className="mt-3 text-sm text-muted-foreground">
+              <span className="font-mono text-foreground">{fmt(num)} {units[from].symbol}</span> = <span className="font-mono text-foreground">{fmt(result)} {units[to].symbol}</span>
+            </p>
+          )}
+        </ToolPanel>
 
-        <div className="lg:col-span-7">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-[2.5rem] overflow-hidden min-h-[500px]">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Zap className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Quick Conversion Grid</span>
-              </div>
-              <div className="px-3 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-bold uppercase tracking-wider">
-                All {category} units
-              </div>
-            </div>
-            <CardContent className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {allConversions.map((conv) => (
-                  <div 
-                    key={conv.key}
-                    className="p-4 rounded-2xl bg-muted/20 border border-border/20 hover:border-primary/20 transition-all group relative"
-                  >
-                    <div className="flex justify-between items-start mb-1">
-                      <p className="text-[10px] font-bold uppercase text-muted-foreground/60">{conv.name}</p>
-                      <Button 
-                        variant="ghost" size="icon" className="h-6 w-6 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={() => copy(conv.value, conv.key)}
-                      >
-                        {copied === conv.key ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                      </Button>
-                    </div>
-                    <p className="text-lg font-mono font-bold truncate pr-8">{conv.value || "0"}</p>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+        {all.length > 0 && (
+          <ToolPanel title={`${fmt(num)} ${units[from].symbol} in every unit`}>
+            <ul className="grid sm:grid-cols-2 divide-y divide-border sm:[&>li:nth-child(odd)]:border-r sm:[&>li]:border-border">
+              {all.map(({ k, u, v }) => (
+                <li key={k} className={cn("group flex items-center gap-3 px-3.5 h-10", k === to && "bg-accent/40")}>
+                  <button type="button" onClick={() => setTo(k)} className="flex-1 min-w-0 text-left">
+                    <span className="block font-mono text-[13px] tabular-nums truncate">{fmt(v)}</span>
+                  </button>
+                  <span className="text-xs text-muted-foreground truncate">{u.name}</span>
+                  <CopyButton text={String(Number(v.toPrecision(12)))} iconOnly className="opacity-0 group-hover:opacity-100 focus:opacity-100" />
+                </li>
+              ))}
+            </ul>
+          </ToolPanel>
+        )}
+      </OptionsLayout>
     </ToolLayout>
   );
 }
-

@@ -1,187 +1,194 @@
 "use client";
 
-import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { 
-  Building, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  Info,
-  ShieldCheck,
-  ShieldAlert,
-  Globe,
-  Search,
-  Landmark
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useMemo, useState } from "react";
 import * as ibantools from "ibantools";
+import { Check, X } from "lucide-react";
+import { ToolLayout } from "@/components/tool-layout";
+import { Input } from "@/components/ui/input";
+import { CodeArea, CopyButton, DownloadButton, OptionsLayout, Segmented, StatusBadge, ToolPanel } from "@/components/tool";
+import { cn } from "@/lib/utils";
+
+const E = ibantools.ValidationErrorsIBAN;
+const MESSAGES: Record<number, string> = {
+  [E.NoIBANProvided]: "Enter an IBAN.",
+  [E.NoIBANCountry]: "Unknown country code — the first two letters must be an IBAN country (e.g. DE, GB, FR).",
+  [E.WrongBBANLength]: "Wrong length for this country.",
+  [E.WrongBBANFormat]: "The account part has characters in the wrong places for this country.",
+  [E.ChecksumNotNumber]: "Characters 3–4 must be the two check digits.",
+  [E.WrongIBANChecksum]: "Check digits don't match — likely a typo or swapped digits.",
+  [E.WrongAccountBankBranchChecksum]: "The national bank/account checksum is invalid.",
+  [E.QRIBANNotAllowed]: "QR-IBANs aren't allowed here.",
+};
+
+const regionName = (cc: string) => {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "region" }).of(cc) ?? cc;
+  } catch {
+    return cc;
+  }
+};
+
+interface Checked {
+  raw: string;
+  clean: string;
+  valid: boolean;
+  errors: string[];
+  country?: string;
+  details?: ReturnType<typeof ibantools.extractIBAN>;
+}
+
+function check(raw: string): Checked {
+  const clean = ibantools.electronicFormatIBAN(raw) ?? raw.replace(/[\s-]/g, "").toUpperCase();
+  const v = ibantools.validateIBAN(clean);
+  const cc = clean.slice(0, 2);
+  return {
+    raw,
+    clean,
+    valid: v.valid,
+    errors: v.valid ? [] : v.errorCodes.map((c) => MESSAGES[c] ?? "Invalid IBAN."),
+    country: /^[A-Z]{2}$/.test(cc) ? cc : undefined,
+    details: v.valid ? ibantools.extractIBAN(clean) : undefined,
+  };
+}
+
+const SAMPLES = ["DE89 3704 0044 0532 0130 00", "GB82 WEST 1234 5698 7654 32", "FR14 2004 1010 0505 0001 3M02 606", "NL91ABNA0417164300"];
 
 export default function IBANValidator() {
+  const [mode, setMode] = useState<"single" | "batch">("single");
   const [input, setInput] = useState("");
-  const [result, setResult] = useState<any>(null);
-  const [copied, setCopied] = useState(false);
+  const [batch, setBatch] = useState("");
 
-  useEffect(() => {
-    const clean = input.replace(/\s/g, "");
-    if (!clean) {
-      setResult(null);
-      return;
-    }
+  const r = useMemo(() => (input.trim() ? check(input) : null), [input]);
+  const batchResults = useMemo(() => batch.split(/\n/).map((l) => l.trim()).filter(Boolean).map(check), [batch]);
 
-    const isValid = ibantools.validateIBAN(clean);
-    if (isValid.valid) {
-      const parts = ibantools.extractIBAN(clean);
-      setResult({
-        isValid: true,
-        country: parts?.countryCode,
-        bban: (parts as any)?.bban || (parts as any)?.ban || "",
-        formatted: ibantools.friendlyFormatIBAN(clean)
-      });
-    } else {
-      setResult({
-        isValid: false,
-        error: isValid.errorCodes?.[0] || "Invalid IBAN format"
-      });
-    }
-  }, [input]);
+  const spec = r?.country ? ibantools.countrySpecs[r.country] : undefined;
+  const expected = spec?.chars;
 
-  const copyToClipboard = () => {
-    if (!result?.formatted) return;
-    navigator.clipboard.writeText(result.formatted);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const rows: [string, string | undefined][] = r?.valid && r.details
+    ? [
+        ["Country", `${regionName(r.details.countryCode ?? "")} (${r.details.countryCode})`],
+        ["Check digits", r.clean.slice(2, 4)],
+        ["Bank code", r.details.bankIdentifier || undefined],
+        ["Branch code", r.details.branchIdentifier || undefined],
+        ["Account number", r.details.accountNumber || undefined],
+        ["BBAN", r.details.bban],
+        ["SEPA", ibantools.isSEPACountry(r.details.countryCode ?? "") ? "Yes — euro transfers supported" : "No"],
+        ["Electronic format", r.clean],
+      ]
+    : [];
+
+  const csv = ["iban,valid,country,error", ...batchResults.map((b) => `${b.clean},${b.valid},${b.country ?? ""},"${b.errors[0] ?? ""}"`)].join("\n");
+  const validCount = batchResults.filter((b) => b.valid).length;
+
+  const options = (
+    <ToolPanel title="Mode" bodyClassName="p-3 space-y-3">
+      <Segmented
+        value={mode}
+        onChange={setMode}
+        options={[
+          { value: "single", label: "One IBAN" },
+          { value: "batch", label: "Many (one per line)" },
+        ]}
+      />
+      <div className="space-y-1">
+        <p className="text-xs font-medium">Try an example</p>
+        {SAMPLES.map((s) => (
+          <button key={s} type="button" onClick={() => (mode === "single" ? setInput(s) : setBatch((b) => (b ? `${b}\n${s}` : s)))} className="block w-full text-left font-mono text-[11px] px-2 py-1 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground">
+            {s}
+          </button>
+        ))}
+      </div>
+      <p className="text-[11px] text-muted-foreground">Checks country format, length and the ISO 13616 check digits. It can&apos;t tell whether the account exists or is open.</p>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="iban-validator">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Editor Side */}
-        <div className="lg:col-span-5 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-4">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Input IBAN</Label>
-                <div className="relative">
-                  <Input 
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    placeholder="e.g. DE89 3704 0044 0532..."
-                    className="h-16 px-6 rounded-2xl bg-muted/30 border-border/40 font-mono text-xl focus:ring-primary/20"
-                  />
-                  {input && (
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      onClick={() => setInput("")}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </Button>
-                  )}
-                </div>
+      <OptionsLayout options={options}>
+        {mode === "single" ? (
+          <>
+            <ToolPanel bodyClassName="p-3.5 space-y-2">
+              <div className="relative">
+                <Input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="DE89 3704 0044 0532 0130 00"
+                  spellCheck={false}
+                  autoFocus
+                  className={cn("h-12 text-lg font-mono tracking-wide pr-28 uppercase", r && (r.valid ? "border-emerald-500/60" : "border-destructive/60"))}
+                  aria-invalid={r ? !r.valid : undefined}
+                />
+                {r && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <StatusBadge tone={r.valid ? "success" : "error"}>{r.valid ? "Valid" : "Invalid"}</StatusBadge>
+                  </span>
+                )}
               </div>
-
-              <div className="p-4 rounded-2xl bg-primary/5 border border-primary/10 space-y-2">
-                <div className="flex items-center gap-2">
-                  <Info className="w-4 h-4 text-primary" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-primary">Verification Logic</span>
-                </div>
-                <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  Validates IBAN structure, length, and checksum according to the ISO 13616 standard.
-                </p>
+              <div className="flex items-center gap-3 text-[11px] text-muted-foreground tabular-nums">
+                <span>{r?.clean.length ?? 0} characters{expected ? ` · ${expected} expected for ${r?.country}` : ""}</span>
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            </ToolPanel>
 
-        {/* Output Side */}
-        <div className="lg:col-span-7 h-full">
-          {result ? (
-            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
-              <div className={cn(
-                "p-8 rounded-[2.5rem] border-2 flex items-center gap-6",
-                result.isValid ? "bg-green-500/10 border-green-500/30 text-green-600" : "bg-destructive/10 border-destructive/30 text-destructive"
-              )}>
-                <div className={cn(
-                  "w-16 h-16 rounded-3xl flex items-center justify-center shrink-0 shadow-lg",
-                  result.isValid ? "bg-green-500 text-white" : "bg-destructive text-white"
-                )}>
-                  {result.isValid ? <ShieldCheck className="w-8 h-8" /> : <ShieldAlert className="w-8 h-8" />}
-                </div>
-                <div>
-                  <h3 className="text-2xl font-black tracking-tight">{result.isValid ? "Valid IBAN" : "Invalid IBAN"}</h3>
-                  <p className="text-sm font-medium opacity-80">
-                    {result.isValid ? "Checksum and structure are correct." : result.error}
-                  </p>
-                </div>
-              </div>
+            {r && !r.valid && (
+              <ToolPanel title="Problems">
+                <ul className="divide-y divide-border">
+                  {r.errors.map((e) => (
+                    <li key={e} className="flex items-start gap-2 px-3.5 py-2.5 text-sm">
+                      <X className="w-4 h-4 text-destructive shrink-0 mt-0.5" /> {e}
+                    </li>
+                  ))}
+                </ul>
+              </ToolPanel>
+            )}
 
-              {result.isValid && (
-                <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-                  <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Landmark className="w-4 h-4 text-primary" />
-                      <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Account Breakdown</span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={copyToClipboard}
-                      className={cn(
-                        "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                        copied && "text-green-500 hover:text-green-500"
-                      )}
-                    >
-                      {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-                      {copied ? "Copied" : "Copy Formatted"}
-                    </Button>
-                  </div>
-                  <CardContent className="p-8 space-y-8">
-                    <div className="space-y-1">
-                      <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest">Formatted IBAN</p>
-                      <p className="text-3xl font-mono font-bold tracking-wider">{result.formatted}</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-8 pt-4">
-                      <div className="space-y-1">
-                        <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest">Country</p>
-                        <div className="flex items-center gap-2">
-                          <Globe className="w-4 h-4 text-primary/40" />
-                          <p className="text-lg font-bold">{result.country}</p>
-                        </div>
+            {r?.valid && (
+              <ToolPanel
+                title="Details"
+                actions={
+                  <>
+                    <code className="hidden sm:block font-mono text-xs mr-1">{ibantools.friendlyFormatIBAN(r.clean)}</code>
+                    <CopyButton text={ibantools.friendlyFormatIBAN(r.clean) ?? r.clean} label="Copy formatted" />
+                  </>
+                }
+              >
+                <dl className="divide-y divide-border">
+                  {rows
+                    .filter(([, v]) => v)
+                    .map(([k, v]) => (
+                      <div key={k} className="group flex items-center gap-3 px-3.5 h-10">
+                        <dt className="w-36 shrink-0 text-xs text-muted-foreground">{k}</dt>
+                        <dd className="flex-1 font-mono text-[13px] truncate">{v}</dd>
+                        <CopyButton text={v} iconOnly className="opacity-0 group-hover:opacity-100 focus:opacity-100" />
                       </div>
-                      <div className="space-y-1">
-                        <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-widest">BBAN</p>
-                        <p className="text-sm font-mono font-bold truncate">{result.bban}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center p-12 text-center space-y-6 bg-muted/20 rounded-[2.5rem] border border-dashed border-border/40 min-h-[400px]">
-              <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center">
-                <Search className="w-10 h-10 text-muted-foreground/30" />
-              </div>
-              <div className="space-y-2">
-                <h3 className="font-bold text-lg">Waiting for Input</h3>
-                <p className="text-sm text-muted-foreground max-w-xs">
-                  Enter an IBAN to see its validity and account breakdown.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+                    ))}
+                </dl>
+              </ToolPanel>
+            )}
+          </>
+        ) : (
+          <>
+            <ToolPanel title="IBANs">
+              <CodeArea value={batch} onChange={(e) => setBatch(e.target.value)} placeholder={"Paste IBANs, one per line…"} minHeight={180} />
+            </ToolPanel>
+            {batchResults.length > 0 && (
+              <ToolPanel
+                title={`Results · ${validCount}/${batchResults.length} valid`}
+                actions={<DownloadButton content={csv} filename="iban-check.csv" mime="text/csv" label="CSV" />}
+              >
+                <ul className="divide-y divide-border max-h-[480px] overflow-y-auto custom-scrollbar">
+                  {batchResults.map((b, i) => (
+                    <li key={i} className="flex items-center gap-3 px-3.5 py-2 text-sm">
+                      {b.valid ? <Check className="w-4 h-4 text-emerald-600 shrink-0" /> : <X className="w-4 h-4 text-destructive shrink-0" />}
+                      <code className="font-mono text-[13px] flex-1 truncate">{ibantools.friendlyFormatIBAN(b.clean) ?? b.raw}</code>
+                      <span className="text-xs text-muted-foreground truncate max-w-[45%]">{b.valid ? regionName(b.country ?? "") : b.errors[0]}</span>
+                    </li>
+                  ))}
+                </ul>
+              </ToolPanel>
+            )}
+          </>
+        )}
+      </OptionsLayout>
     </ToolLayout>
   );
 }
