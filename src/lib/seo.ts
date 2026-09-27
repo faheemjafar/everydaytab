@@ -113,11 +113,13 @@ export function generateToolMetadata(toolId: string): Metadata {
       url: `${BASE_URL}${tool.path}`,
       siteName: "EverydayTab",
       type: "website",
+      images: [{ url: `/og?tool=${tool.id}`, width: 1200, height: 630, alt: `${tool.name} — free online tool on EverydayTab` }],
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
+      images: [`/og?tool=${tool.id}`],
     },
   };
 }
@@ -302,11 +304,13 @@ export function generateCategoryMetadata(categoryId: string, toolCount: number):
       url: `/category/${categoryId}`,
       siteName: "EverydayTab",
       type: "website",
+      images: [{ url: `/og?category=${categoryId}`, width: 1200, height: 630, alt: `${category.name} on EverydayTab` }],
     },
     twitter: {
       card: "summary_large_image",
       title: `${category.name} - ${toolCount} Free Online Tools | EverydayTab`,
       description,
+      images: [`/og?category=${categoryId}`],
     },
   };
 }

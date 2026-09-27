@@ -7,8 +7,9 @@ export default function robots(): MetadataRoute.Robots {
     rules: [
       {
         userAgent: "*",
-        allow: "/",
-        disallow: ["/api/", "/*?category=", "/*?search=", "/*?*"],
+        // /og?… must stay crawlable so social/search bots can fetch og:image.
+        allow: ["/", "/og?*"],
+        disallow: ["/api/", "/settings", "/favorites", "/*?category=", "/*?search=", "/*?*"],
       },
     ],
     sitemap: `${BASE_URL}/sitemap.xml`,
