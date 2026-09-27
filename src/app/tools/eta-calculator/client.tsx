@@ -1,215 +1,128 @@
 "use client";
 
+import { useState } from "react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { 
-  Clock, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  Info,
-  Play,
-  RotateCcw,
-  Timer,
-  Navigation,
-  Activity,
-  History,
-  TrendingUp,
-  Percent
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Field, OptionsLayout, Segmented, Stat, StatGrid, ToolAlert, ToolPanel } from "@/components/tool";
+import { useMounted } from "@/lib/local-store";
+
+type Mode = "task" | "travel";
+type Basis = "rate" | "started";
+const RATE_UNIT = { s: 1, min: 60, h: 3600 } as const;
+
+function duration(sec: number) {
+  if (!Number.isFinite(sec) || sec < 0) return "—";
+  const d = Math.floor(sec / 86400), h = Math.floor(sec / 3600) % 24, m = Math.floor(sec / 60) % 60, s = Math.floor(sec % 60);
+  return [d && `${d}d`, (d || h) && `${h}h`, `${m}m`, !d && `${s}s`].filter(Boolean).join(" ");
+}
 
 export default function ETACalculator() {
-  const [total, setTotal] = useState<number>(100);
-  const [processed, setProcessed] = useState<number>(0);
-  const [speed, setSpeed] = useState<number>(1);
-  const [unit, setSpeedUnit] = useState("items/s");
-  const [eta, setEta] = useState<string>("");
-  const [percentage, setPercentage] = useState(0);
+  const mounted = useMounted();
+  const [mode, setMode] = useState<Mode>("task");
+  const [total, setTotal] = useState("1000");
+  const [done, setDone] = useState("250");
+  const [basis, setBasis] = useState<Basis>("started");
+  const [rate, setRate] = useState("5");
+  const [rateUnit, setRateUnit] = useState<keyof typeof RATE_UNIT>("s");
+  const [started, setStarted] = useState("");
+  const [dist, setDist] = useState("350");
+  const [speed, setSpeed] = useState("90");
+  const [stops, setStops] = useState("15");
+  const [depart, setDepart] = useState("");
+  const [now] = useState(() => Date.now());
 
-  const calculateETA = () => {
-    if (total <= 0 || processed < 0 || speed <= 0) {
-      setEta("N/A");
-      setPercentage(0);
-      return;
-    }
+  const nowLocal = mounted ? new Date(now - new Date(now).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
+  const at = (ms: number) => (mounted && Number.isFinite(ms) ? new Date(ms).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" }) : "—");
 
-    const remaining = total - processed;
-    if (remaining <= 0) {
-      setEta("Completed");
-      setPercentage(100);
-      return;
-    }
+  // Task: remaining ÷ rate, where rate comes from a stated speed or from progress since the start time.
+  const T = parseFloat(total), D = parseFloat(done);
+  const startMs = started ? new Date(started).getTime() : NaN;
+  const elapsed = (now - startMs) / 1000;
+  const perSec = basis === "rate" ? parseFloat(rate) / RATE_UNIT[rateUnit] : D / elapsed;
+  const remaining = T - D;
+  const secLeft = remaining / perSec;
+  const pct = T > 0 ? Math.min(100, Math.max(0, (D / T) * 100)) : 0;
+  const taskOk = T > 0 && D >= 0 && D <= T && perSec > 0 && Number.isFinite(perSec);
 
-    const seconds = remaining / speed;
-    setPercentage(Math.min(100, (processed / total) * 100));
+  // Travel: distance ÷ speed + stops.
+  const travelSec = (parseFloat(dist) / parseFloat(speed)) * 3600 + (parseFloat(stops) || 0) * 60;
+  const departMs = new Date(depart || nowLocal).getTime();
 
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-
-    const parts = [];
-    if (hrs > 0) parts.push(`${hrs}h`);
-    if (mins > 0) parts.push(`${mins}m`);
-    parts.push(`${secs}s`);
-    
-    setEta(parts.join(" "));
-  };
-
-  useEffect(() => {
-    calculateETA();
-  }, [total, processed, speed]);
-
-  const clear = () => {
-    setTotal(100);
-    setProcessed(0);
-    setSpeed(1);
-  };
+  const options =
+    mode === "task" ? (
+      <ToolPanel title="Progress" bodyClassName="p-3 space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Total" htmlFor="et"><Input id="et" value={total} onChange={(e) => setTotal(e.target.value)} inputMode="decimal" className="font-mono" /></Field>
+          <Field label="Done so far" htmlFor="ed"><Input id="ed" value={done} onChange={(e) => setDone(e.target.value)} inputMode="decimal" className="font-mono" /></Field>
+        </div>
+        <Field label="Estimate from"><Segmented size="sm" value={basis} onChange={setBasis} options={[{ value: "started", label: "When I started" }, { value: "rate", label: "A known rate" }]} /></Field>
+        {basis === "started" ? (
+          <Field label="Started at" htmlFor="es"><Input id="es" type="datetime-local" value={started} onChange={(e) => setStarted(e.target.value)} max={nowLocal} /></Field>
+        ) : (
+          <Field label="Rate (units per…)" htmlFor="er">
+            <div className="flex gap-1.5">
+              <Input id="er" value={rate} onChange={(e) => setRate(e.target.value)} inputMode="decimal" className="font-mono" />
+              <Segmented size="sm" value={rateUnit} onChange={setRateUnit} options={[{ value: "s", label: "/s" }, { value: "min", label: "/min" }, { value: "h", label: "/h" }]} />
+            </div>
+          </Field>
+        )}
+        <p className="text-[11px] text-muted-foreground">Works for anything countable: file copies (MB), pages read, tasks, downloads, migrations.</p>
+      </ToolPanel>
+    ) : (
+      <ToolPanel title="Trip" bodyClassName="p-3 space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Distance" htmlFor="tdist"><Input id="tdist" value={dist} onChange={(e) => setDist(e.target.value)} inputMode="decimal" className="font-mono" /></Field>
+          <Field label="Average speed" hint="same unit per hour" htmlFor="tspd"><Input id="tspd" value={speed} onChange={(e) => setSpeed(e.target.value)} inputMode="decimal" className="font-mono" /></Field>
+        </div>
+        <Field label="Stops (minutes total)" htmlFor="tst"><Input id="tst" value={stops} onChange={(e) => setStops(e.target.value)} inputMode="numeric" className="w-24" /></Field>
+        <Field label="Departure" hint="Defaults to now" htmlFor="tdep"><Input id="tdep" type="datetime-local" value={depart || nowLocal} onChange={(e) => setDepart(e.target.value)} /></Field>
+      </ToolPanel>
+    );
 
   return (
     <ToolLayout toolId="eta-calculator">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Editor Side */}
-        <div className="lg:col-span-5 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-6">
-                <div className="space-y-4">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Total Workload</Label>
-                  <Input 
-                    type="number"
-                    value={total}
-                    onChange={(e) => setTotal(parseFloat(e.target.value) || 0)}
-                    className="h-14 px-6 rounded-2xl bg-muted/30 border-border/40 font-bold text-xl focus:ring-primary/20"
-                    placeholder="e.g. 1000"
-                  />
-                </div>
-
-                <div className="space-y-4">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Work Done (Processed)</Label>
-                  <Input 
-                    type="number"
-                    value={processed}
-                    onChange={(e) => setProcessed(parseFloat(e.target.value) || 0)}
-                    className="h-14 px-6 rounded-2xl bg-muted/30 border-border/40 font-bold text-xl focus:ring-primary/20"
-                    placeholder="e.g. 250"
-                  />
-                </div>
-
-                <div className="space-y-4">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Processing Speed</Label>
-                  <div className="flex gap-2">
-                    <Input 
-                      type="number"
-                      value={speed}
-                      onChange={(e) => setSpeed(parseFloat(e.target.value) || 0)}
-                      className="h-14 px-6 rounded-2xl bg-muted/30 border-border/40 font-bold text-xl focus:ring-primary/20 flex-1"
-                      placeholder="e.g. 10"
-                    />
-                    <select 
-                      value={unit} 
-                      onChange={(e) => setSpeedUnit(e.target.value)}
-                      className="h-14 px-4 rounded-2xl bg-muted/50 border border-border/40 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    >
-                      <option value="items/s">Items/s</option>
-                      <option value="kb/s">KB/s</option>
-                      <option value="mb/s">MB/s</option>
-                      <option value="% /s">% /s</option>
-                    </select>
+      <div className="space-y-3">
+        <Segmented value={mode} onChange={setMode} options={[{ value: "task", label: "Task progress" }, { value: "travel", label: "Travel time" }]} />
+        <OptionsLayout options={options}>
+          {mode === "task" ? (
+            taskOk ? (
+              <>
+                <ToolPanel bodyClassName="p-5 space-y-3">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="text-4xl font-semibold">{remaining === 0 ? "Done" : duration(secLeft)}</p>
+                    <p className="text-sm text-muted-foreground">{remaining === 0 ? "" : `finishes ${at(now + secLeft * 1000)}`}</p>
                   </div>
-                </div>
-              </div>
-
-              <Button 
-                variant="ghost"
-                onClick={clear}
-                className="w-full h-12 rounded-xl font-bold text-destructive hover:bg-destructive/10"
-              >
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Reset Calculator
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Output Side */}
-        <div className="lg:col-span-7 space-y-6">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col min-h-[400px]">
-            <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <Timer className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-primary">Time Prediction</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className={cn("w-2 h-2 rounded-full", processed < total ? "bg-green-500 animate-pulse" : "bg-primary")} />
-                <span className="text-[10px] font-bold text-primary uppercase tracking-widest">
-                  {processed < total ? "Calculating..." : "Finished"}
-                </span>
-              </div>
-            </div>
-            
-            <CardContent className="p-8 flex-1 flex flex-col items-center justify-center space-y-12 bg-primary/[0.01]">
-              <div className="space-y-2 text-center">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Estimated Remaining Time</p>
-                <div className="text-7xl md:text-8xl font-black tracking-tighter text-foreground drop-shadow-sm">
-                  {eta}
-                </div>
-              </div>
-
-              <div className="w-full max-w-md space-y-4">
-                <div className="flex justify-between items-end px-1">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Overall Progress</span>
-                  <span className="text-xl font-black text-primary tracking-tighter">{percentage.toFixed(1)}%</span>
-                </div>
-                <div className="h-4 w-full bg-muted/50 rounded-full overflow-hidden p-1 border border-border/20 shadow-inner">
-                  <div 
-                    className="h-full bg-primary rounded-full transition-all duration-500 relative group"
-                    style={{ width: `${percentage}%` }}
-                  >
-                    <div className="absolute inset-0 bg-white/20 animate-pulse" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-6 w-full max-w-md">
-                <div className="p-4 rounded-3xl bg-muted/20 border border-border/10 flex flex-col items-center gap-2">
-                  <Activity className="w-4 h-4 text-muted-foreground/40" />
-                  <span className="text-[8px] font-bold uppercase text-muted-foreground">Remaining</span>
-                  <span className="text-sm font-bold">{Math.max(0, total - processed).toLocaleString()}</span>
-                </div>
-                <div className="p-4 rounded-3xl bg-muted/20 border border-border/10 flex flex-col items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-muted-foreground/40" />
-                  <span className="text-[8px] font-bold uppercase text-muted-foreground">Speed</span>
-                  <span className="text-sm font-bold">{speed} {unit}</span>
-                </div>
-                <div className="p-4 rounded-3xl bg-muted/20 border border-border/10 flex flex-col items-center gap-2">
-                  <Percent className="w-4 h-4 text-muted-foreground/40" />
-                  <span className="text-[8px] font-bold uppercase text-muted-foreground">Ratio</span>
-                  <span className="text-sm font-bold">1:{((total - processed) / (speed || 1)).toFixed(0)}s</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="p-8 rounded-[2.5rem] bg-muted/30 border border-border/40 flex items-start gap-6">
-            <div className="w-16 h-16 rounded-3xl bg-background flex items-center justify-center text-muted-foreground/30 shadow-inner shrink-0">
-              <Info className="w-8 h-8" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="font-bold text-sm">How it's calculated</h3>
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                The ETA is calculated by taking the <strong>remaining workload</strong> (Total - Done) and dividing it by your <strong>current speed</strong>. This assumes a constant rate of progress.
-              </p>
-            </div>
-          </div>
-        </div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary" style={{ width: `${pct}%` }} /></div>
+                  <p className="text-xs text-muted-foreground tabular-nums">{pct.toFixed(1)}% · {remaining.toLocaleString()} left</p>
+                </ToolPanel>
+                <StatGrid>
+                  <Stat label="Rate" value={`${(perSec * 60).toLocaleString(undefined, { maximumFractionDigits: 2 })}/min`} />
+                  <Stat label="Per hour" value={(perSec * 3600).toLocaleString(undefined, { maximumFractionDigits: 1 })} />
+                  {basis === "started" && <Stat label="Elapsed" value={duration(elapsed)} />}
+                  <Stat label="Total time" value={duration(T / perSec)} />
+                </StatGrid>
+              </>
+            ) : (
+              <ToolAlert tone="info">{basis === "started" && !started ? "Enter when you started to estimate the rate from your progress." : "Enter a total, progress (≤ total) and a positive rate."}</ToolAlert>
+            )
+          ) : Number.isFinite(travelSec) && travelSec > 0 ? (
+            <>
+              <ToolPanel bodyClassName="p-5 space-y-1">
+                <p className="text-xs text-muted-foreground">Arrive</p>
+                <p className="text-4xl font-semibold">{at(departMs + travelSec * 1000)}</p>
+                <p className="text-sm text-muted-foreground">after {duration(travelSec)} on the road</p>
+              </ToolPanel>
+              <StatGrid>
+                <Stat label="Driving" value={duration(travelSec - (parseFloat(stops) || 0) * 60)} />
+                <Stat label="Stops" value={`${parseFloat(stops) || 0} min`} />
+                <Stat label="+10% traffic" value={at(departMs + travelSec * 1100)} />
+                <Stat label="Pace" value={`${(60 / parseFloat(speed)).toFixed(2)} min/unit`} />
+              </StatGrid>
+            </>
+          ) : (
+            <ToolAlert tone="info">Enter a distance and speed.</ToolAlert>
+          )}
+        </OptionsLayout>
       </div>
     </ToolLayout>
   );

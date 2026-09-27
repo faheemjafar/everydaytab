@@ -21,7 +21,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Never define components that render inputs inside another component's body (`const Row = () => <Input/>` inside render): React remounts them every keystroke and the field loses focus. Hoist them or inline the JSX.
 - Anything depending on the viewer's clock, zone or locale (`new Date()`, `toLocaleString`, `Intl…resolvedOptions`) must render after `useMounted()` to avoid hydration mismatches.
 - The TS target is below ES2020: use `BigInt(n)`, not `0n` literals.
-- Never load remote assets (images, fonts, APIs) from a tool — everything must work offline and nothing may leave the device.
+- Tools process user data locally — never upload user content or inputs. Remote calls are allowed only for public reference data the tool genuinely needs (e.g. live gold/silver prices and exchange rates in zakat-calculator): send no user data, cache results (localStorage), show the source and last-updated time, and degrade gracefully (retry + manual fallback) when offline. Don't load decorative remote assets (images, fonts).
 - Exactly one primary action per tool uses `<Button size="lg">`; everything else is default/`sm`. Avoid `rounded-[2rem]`, `backdrop-blur`, `shadow-*` and per-tool colour palettes.
 - Lint uses the React Compiler rules: no `setState` synchronously inside effects (derive from a key/pathname instead), no `Date.now()`/`Math.random()` during render.
 - Verify with `npx tsc --noEmit -p .`, `npx eslint <paths>`, `npx next build`.

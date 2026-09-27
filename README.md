@@ -13,7 +13,7 @@
 
 ## What's inside
 
-**205 tools** across **14 categories**, ordered by demand:
+**194 tools** across **14 categories**, ordered by demand:
 
 | Category | Tools | Examples |
 |---|---:|---|
@@ -22,11 +22,11 @@
 | **Video** | 13 | Converter, compressor, trimmer, merger, cropper, rotator, speed changer, GIF ↔ video, extract audio |
 | **Audio** | 19 | Converter, trimmer, merger, compressor, equalizer, loudness normalizer, silence remover, ringtone maker |
 | **Converters** | 15 | Unix timestamp, time zones, units, temperature, number bases, Roman numerals, Morse, IBAN validator |
-| **Text** | 18 | Word counter, case converter, diff, sorter, cleaner, slugify, readability, Markdown ↔ HTML |
+| **Text** | 16 | Word counter, case converter, diff, sorter, cleaner, slugify, readability, statistics |
 | **Developer** | 35 | JSON (format/tree, diff, schema, → TS/Go/SQL/CSV), YAML/TOML/XML, JWT decode/sign/verify, regex, cron, cURL → code, Docker Compose, SQL, subnet |
-| **Generators** | 13 | QR codes, barcodes, WiFi QR, UUID, ULID, tokens, passwords, Lorem Ipsum, invoices, ASCII art |
-| **Color** | 9 | HEX/RGB/HSL/OKLCH/LAB converter, palette extractor, contrast checker, color-blindness simulator, name finder |
-| **Math** | 16 | Calculator, expression evaluator, percentage, fractions, BMI, calories, salary, tips, dates, age, ETA |
+| **Generators** | 10 | QR codes, barcodes (11 formats, batch), WiFi QR, UUID v4/v7 & ULID, tokens, Lorem Ipsum, invoices, ASCII art, emoji |
+| **Color** | 6 | Converter (HEX/RGB/HSL/OKLCH/Lab/P3), name finder (CSS + Tailwind), mixer, harmonies, ΔE distance, colour temperature |
+| **Math** | 13 | Scientific calculator, percentage, fractions, dates & countdowns, age, stopwatch/timer, ETA, BMI, calories, GPA, salary, tips, zakat (live gold/silver prices) |
 | **Security** | 11 | Hash & file checksums, HMAC (webhook verify), bcrypt, AES-256-GCM, RSA keys (PEM/SSH/JWK), TOTP/HOTP, password strength, X.509 decoder, safe-link decoder |
 | **SEO** | 6 | Meta tags + SERP preview, Open Graph generator & audit, robots.txt, sitemap, FAQ schema, keyword density |
 | **Markdown** | 5 | Live editor, table generator, cheatsheet, → HTML, file combiner |
@@ -118,7 +118,6 @@ Conventions for the UI system are in [`AGENTS.md`](AGENTS.md).
 
 ## Roadmap
 
-- [ ] Migrate remaining tools onto the shared primitives (Developer pruned to 35 tools; PDF, Image, Video, Audio, Converters, Text and Developer migrated)
 - [ ] Build-time popularity ranking from analytics exports
 - [ ] More PDF tools (OCR, redaction, form filling)
 - [ ] Batch/queue processing for file-based tools

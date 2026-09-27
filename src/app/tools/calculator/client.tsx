@@ -1,209 +1,167 @@
 "use client";
 
+import { useMemo, useRef, useState } from "react";
+import { all, create, type MathJsInstance } from "mathjs";
+import { Delete, History, Trash2 } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { 
-  Calculator as CalcIcon, 
-  History, 
-  Divide, 
-  X, 
-  Minus, 
-  Plus, 
-  Equal,
-  Delete
-} from "lucide-react";
+import { CopyButton, Segmented, ToolPanel } from "@/components/tool";
 import { cn } from "@/lib/utils";
 
+type Angle = "rad" | "deg";
+
+// BigNumber arithmetic: 0.1 + 0.2 = 0.3, and large integers stay exact.
+function makeMath(angle: Angle): MathJsInstance {
+  const m = create(all, { number: "BigNumber", precision: 64 });
+  if (angle === "deg") {
+    const toRad = (x: unknown) => m.multiply(x as never, m.divide(m.pi, 180) as never);
+    const toDeg = (x: unknown) => m.multiply(x as never, m.divide(180, m.pi) as never);
+    const base = { sin: m.sin, cos: m.cos, tan: m.tan, asin: m.asin, acos: m.acos, atan: m.atan };
+    m.import(
+      {
+        sin: (x: unknown) => (m.isUnit(x) ? base.sin(x as never) : base.sin(toRad(x) as never)),
+        cos: (x: unknown) => (m.isUnit(x) ? base.cos(x as never) : base.cos(toRad(x) as never)),
+        tan: (x: unknown) => (m.isUnit(x) ? base.tan(x as never) : base.tan(toRad(x) as never)),
+        asin: (x: unknown) => toDeg(base.asin(x as never)),
+        acos: (x: unknown) => toDeg(base.acos(x as never)),
+        atan: (x: unknown) => toDeg(base.atan(x as never)),
+      },
+      { override: true }
+    );
+  }
+  return m;
+}
+const MATH = { rad: makeMath("rad"), deg: makeMath("deg") };
+
+/** Friendlier syntax: ×, ÷, −, "12% of 200", "√9", "π". */
+function normalise(expr: string) {
+  return expr
+    .replace(/×/g, "*").replace(/÷/g, "/").replace(/−/g, "-").replace(/π/g, "pi").replace(/√\s*\(/g, "sqrt(").replace(/√\s*([\d.]+)/g, "sqrt($1)")
+    .replace(/([\d.]+)\s*%\s*of\s*/gi, "($1/100)*");
+}
+
+function fmt(m: MathJsInstance, v: unknown) {
+  if (typeof v === "function") return "function";
+  // Snap BigNumber residue from trig (cos(90°) ≈ 1e-64) to zero.
+  if ((m.isBigNumber(v) || typeof v === "number") && v !== 0 && Math.abs(m.number(v as never) as number) < 1e-30) return "0";
+  return m.format(v as never, { precision: 14, lowerExp: -9, upperExp: 21 });
+}
+
+interface Line { expr: string; result: string }
+
+const SCI = ["sin(", "cos(", "tan(", "log(", "ln(", "√(", "^", "!", "(", ")", "π", "e"];
+const PAD: string[][] = [
+  ["C", "⌫", "%", "÷"],
+  ["7", "8", "9", "×"],
+  ["4", "5", "6", "−"],
+  ["1", "2", "3", "+"],
+  ["ans", "0", ".", "="],
+];
+
 export default function Calculator() {
-  const [display, setDisplay] = useState("0");
-  const [previousValue, setPreviousValue] = useState<string | null>(null);
-  const [operation, setOperation] = useState<string | null>(null);
-  const [waitingForOperand, setWaitingForOperand] = useState(false);
-  const [history, setHistory] = useState<{ expression: string; result: string }[]>([]);
+  const [expr, setExpr] = useState("");
+  const [angle, setAngle] = useState<Angle>("deg");
+  const [sci, setSci] = useState(true);
+  const [history, setHistory] = useState<Line[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  // Variables (x = 3) and ans persist across evaluations.
+  const [scope, setScope] = useState<Record<string, unknown>>({});
 
-  const inputDigit = (digit: string) => {
-    if (waitingForOperand) {
-      setDisplay(digit);
-      setWaitingForOperand(false);
-    } else {
-      setDisplay(display === "0" ? digit : display + digit);
+  const math = MATH[angle];
+  // Live preview without committing variables: evaluate in a throwaway scope.
+  const preview = useMemo(() => {
+    const t = expr.trim();
+    if (!t || /=\s*$/.test(t)) return "";
+    try {
+      const v = math.evaluate(normalise(t.replace(/\bln\(/g, "log(")), new Map(Object.entries(scope)));
+      return v === undefined ? "" : fmt(math, v);
+    } catch {
+      return "";
+    }
+  }, [expr, math, scope]);
+
+  const commit = () => {
+    const t = expr.trim();
+    if (!t) return;
+    try {
+      const map = new Map(Object.entries(scope));
+      const v = math.evaluate(normalise(t.replace(/\bln\(/g, "log(")), map);
+      const r = fmt(math, v);
+      map.set("ans", v);
+      setScope(Object.fromEntries(map));
+      setHistory((h) => [{ expr: t, result: r }, ...h].slice(0, 50));
+      setExpr(/^[a-z_]\w*\s*=/i.test(t) ? "" : r);
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message.replace(/\(char \d+\)/, "").trim());
     }
   };
 
-  const inputDecimal = () => {
-    if (waitingForOperand) {
-      setDisplay("0.");
-      setWaitingForOperand(false);
-    } else if (display.indexOf(".") === -1) {
-      setDisplay(display + ".");
-    }
+  const press = (k: string) => {
+    setError(null);
+    if (k === "C") return setExpr("");
+    if (k === "⌫") return setExpr((x) => x.slice(0, -1));
+    if (k === "=") return commit();
+    setExpr((x) => x + (k === "ln(" ? "ln(" : k));
+    input.current?.focus();
   };
-
-  const clear = () => {
-    setDisplay("0");
-    setPreviousValue(null);
-    setOperation(null);
-    setWaitingForOperand(false);
-  };
-
-  const deleteLast = () => {
-    if (display.length > 1) {
-      setDisplay(display.slice(0, -1));
-    } else {
-      setDisplay("0");
-    }
-  };
-
-  const performOperation = (nextOperation: string) => {
-    const inputValue = parseFloat(display);
-
-    if (previousValue === null) {
-      setPreviousValue(String(inputValue));
-    } else if (operation) {
-      const currentValue = parseFloat(previousValue) || 0;
-      const newValue = calculate(currentValue, inputValue, operation);
-      setDisplay(String(newValue));
-      setPreviousValue(String(newValue));
-    }
-
-    setWaitingForOperand(true);
-    setOperation(nextOperation);
-  };
-
-  const calculate = (firstValue: number, secondValue: number, operation: string) => {
-    switch (operation) {
-      case "+": return firstValue + secondValue;
-      case "-": return firstValue - secondValue;
-      case "×": return firstValue * secondValue;
-      case "÷": return firstValue / secondValue;
-      default: return secondValue;
-    }
-  };
-
-  const handleEqual = () => {
-    const inputValue = parseFloat(display);
-
-    if (previousValue !== null && operation) {
-      const prevValue = parseFloat(previousValue);
-      const newValue = calculate(prevValue, inputValue, operation);
-      const expression = `${prevValue} ${operation} ${inputValue} =`;
-      const result = String(newValue);
-      
-      setHistory(prev => [{ expression, result }, ...prev].slice(0, 5));
-      setDisplay(result);
-      setPreviousValue(null);
-      setOperation(null);
-      setWaitingForOperand(true);
-    }
-  };
-
-  const buttons = [
-    { label: "AC", onClick: clear, type: "action", className: "text-red-500" },
-    { label: "DEL", onClick: deleteLast, type: "action", icon: Delete },
-    { label: "%", onClick: () => setDisplay(String(parseFloat(display) / 100)), type: "action" },
-    { label: "÷", onClick: () => performOperation("÷"), type: "operator", icon: Divide },
-    { label: "7", onClick: () => inputDigit("7"), type: "number" },
-    { label: "8", onClick: () => inputDigit("8"), type: "number" },
-    { label: "9", onClick: () => inputDigit("9"), type: "number" },
-    { label: "×", onClick: () => performOperation("×"), type: "operator", icon: X },
-    { label: "4", onClick: () => inputDigit("4"), type: "number" },
-    { label: "5", onClick: () => inputDigit("5"), type: "number" },
-    { label: "6", onClick: () => inputDigit("6"), type: "number" },
-    { label: "-", onClick: () => performOperation("-"), type: "operator", icon: Minus },
-    { label: "1", onClick: () => inputDigit("1"), type: "number" },
-    { label: "2", onClick: () => inputDigit("2"), type: "number" },
-    { label: "3", onClick: () => inputDigit("3"), type: "number" },
-    { label: "+", onClick: () => performOperation("+"), type: "operator", icon: Plus },
-    { label: "0", onClick: () => inputDigit("0"), type: "number", span: 2 },
-    { label: ".", onClick: inputDecimal, type: "number" },
-    { label: "=", onClick: handleEqual, type: "operator", icon: Equal, className: "bg-primary text-primary-foreground hover:bg-primary/90" },
-  ];
 
   return (
     <ToolLayout toolId="calculator">
-
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-start">
-        <div className="md:col-span-7 flex justify-center">
-          <Card className="w-full max-w-sm border-border/40 shadow-2xl shadow-primary/10 bg-card/40 backdrop-blur-xl rounded-[2.5rem] overflow-hidden p-6 space-y-6">
-            <div className="bg-muted/30 rounded-[2rem] p-6 space-y-1">
-              <div className="text-right h-6 text-xs font-mono text-muted-foreground/60 overflow-hidden truncate">
-                {previousValue} {operation}
-              </div>
-              <div className="text-right text-5xl font-mono font-bold tracking-tighter overflow-hidden truncate">
-                {display}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-4 gap-3">
-              {buttons.map((btn, i) => (
-                <Button
-                  key={i}
-                  variant="ghost"
-                  onClick={btn.onClick}
-                  className={cn(
-                    "h-16 rounded-2xl text-lg font-bold transition-all active:scale-90",
-                    btn.span === 2 ? "col-span-2" : "col-span-1",
-                    btn.type === "number" && "bg-muted/20 hover:bg-muted/40",
-                    btn.type === "action" && "bg-primary/5 text-primary hover:bg-primary/10",
-                    btn.type === "operator" && !btn.className && "bg-muted/40 hover:bg-muted/60 text-primary",
-                    btn.className
-                  )}
-                >
-                  {btn.icon ? <btn.icon className="w-5 h-5" /> : btn.label}
-                </Button>
-              ))}
-            </div>
-          </Card>
-        </div>
-
-        <div className="md:col-span-5 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2">
-              <History className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Calculation History</span>
-            </div>
-            <CardContent className="p-6">
-              {history.length > 0 ? (
-                <div className="space-y-4">
-                  {history.map((item, i) => (
-                    <div key={i} className="flex flex-col items-end border-b border-border/40 pb-3 last:border-0 last:pb-0">
-                      <span className="text-[10px] font-mono text-muted-foreground">{item.expression}</span>
-                      <span className="text-lg font-mono font-bold text-primary">{item.result}</span>
-                    </div>
-                  ))}
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="w-full text-[10px] uppercase font-bold text-muted-foreground hover:text-red-500"
-                    onClick={() => setHistory([])}
-                  >
-                    Clear History
-                  </Button>
-                </div>
-              ) : (
-                <div className="py-12 flex flex-col items-center justify-center text-center space-y-3 opacity-20">
-                  <History className="w-12 h-12" />
-                  <p className="text-sm font-medium">No history yet</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="bg-primary/5 rounded-3xl p-6 border border-primary/10 space-y-3">
-            <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Keyboard Shortcuts</h3>
-            <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-[10px] font-mono text-muted-foreground">
-              <div className="flex justify-between"><span>Numbers</span><span>0-9</span></div>
-              <div className="flex justify-between"><span>Equals</span><span>Enter</span></div>
-              <div className="flex justify-between"><span>Clear</span><span>Esc</span></div>
-              <div className="flex justify-between"><span>Operators</span><span>+ - * /</span></div>
-            </div>
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,420px)_1fr] items-start">
+        <ToolPanel
+          title={<Segmented size="sm" value={sci ? "sci" : "basic"} onChange={(v) => setSci(v === "sci")} options={[{ value: "basic", label: "Basic" }, { value: "sci", label: "Scientific" }]} />}
+          actions={<Segmented size="sm" value={angle} onChange={setAngle} options={[{ value: "deg", label: "DEG" }, { value: "rad", label: "RAD" }]} />}
+          bodyClassName="p-3 space-y-3"
+        >
+          <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
+            <input
+              ref={input}
+              value={expr}
+              onChange={(e) => { setExpr(e.target.value); setError(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") setExpr(""); }}
+              placeholder="Type or tap — e.g. 12% of 250, sin(30), 5 km to mi"
+              spellCheck={false}
+              autoFocus
+              aria-label="Expression"
+              className="w-full bg-transparent text-right font-mono text-2xl outline-none placeholder:text-sm placeholder:text-muted-foreground"
+            />
+            <p className={cn("min-h-5 text-right font-mono text-sm", error ? "text-destructive" : "text-muted-foreground")}>{error ?? (preview && preview !== expr.trim() ? `= ${preview}` : "")}</p>
           </div>
-        </div>
+          {sci && (
+            <div className="grid grid-cols-6 gap-1.5">
+              {SCI.map((k) => <Button key={k} variant="outline" size="sm" onClick={() => press(k)} className="font-mono">{k.replace("(", "")}</Button>)}
+            </div>
+          )}
+          <div className="grid grid-cols-4 gap-1.5">
+            {PAD.flat().map((k) => (
+              <Button key={k} variant={k === "=" ? "default" : /[÷×−+%]/.test(k) ? "secondary" : "outline"} onClick={() => press(k)} className="h-12 text-lg font-mono" aria-label={k === "⌫" ? "Backspace" : k}>
+                {k === "⌫" ? <Delete /> : k}
+              </Button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">Enter evaluates; Esc clears. Supports variables (<code className="font-mono">r = 4</code>), <code className="font-mono">ans</code>, units (<code className="font-mono">60 mph to km/h</code>), fractions, factorials and exact decimals.</p>
+        </ToolPanel>
+
+        <ToolPanel title={<span className="flex items-center gap-1.5"><History className="w-3.5 h-3.5" /> History</span>} actions={history.length > 0 && <Button variant="ghost" size="icon-sm" onClick={() => setHistory([])} aria-label="Clear history"><Trash2 /></Button>}>
+          {history.length ? (
+            <ul className="divide-y divide-border max-h-[560px] overflow-y-auto custom-scrollbar">
+              {history.map((h, i) => (
+                <li key={i} className="group flex items-center gap-3 px-3.5 py-2">
+                  <button type="button" onClick={() => setExpr(h.expr)} className="flex-1 min-w-0 text-left" title="Edit this expression">
+                    <p className="font-mono text-xs text-muted-foreground truncate">{h.expr}</p>
+                    <p className="font-mono text-base truncate">= {h.result}</p>
+                  </button>
+                  <CopyButton text={h.result} iconOnly className="opacity-0 group-hover:opacity-100 focus:opacity-100" />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="px-3.5 py-10 text-center text-xs text-muted-foreground">Calculations appear here. Click one to edit it.</p>
+          )}
+        </ToolPanel>
       </div>
     </ToolLayout>
   );
 }
-

@@ -1,210 +1,191 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
 import { Button } from "@/components/ui/button";
-import { Moon, Coins, Gem, TrendingUp, Wallet, Building2, HandCoins, RotateCcw, Info, CheckCircle2, AlertCircle, CircleDollarSign, ArrowRight, ShieldCheck, Globe, Lock } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Field, OptionsLayout, Segmented, Stat, StatGrid, StatusBadge, ToolAlert, ToolPanel } from "@/components/tool";
+import { createLocalStore, useLocalStore, useMounted } from "@/lib/local-store";
+
+const NISAB_GOLD_G = 87.48;
+const NISAB_SILVER_G = 612.36;
+const KARAT: Record<string, number> = { "24": 1, "22": 22 / 24, "21": 21 / 24, "18": 18 / 24, "14": 14 / 24 };
+const CURRENCIES = ["USD", "EUR", "GBP", "PKR", "INR", "BDT", "SAR", "AED", "QAR", "KWD", "EGP", "TRY", "MYR", "IDR", "NGN", "CAD", "AUD", "ZAR"];
+const TROY_OZ_G = 31.1034768;
+const CACHE_MS = 60 * 60 * 1000;
+
+// Time zone → currency (instant, no request). Covers the main zakat-paying regions.
+const TZ: Record<string, string> = {
+  "Asia/Karachi": "PKR", "Asia/Kolkata": "INR", "Asia/Calcutta": "INR", "Asia/Dhaka": "BDT", "Asia/Riyadh": "SAR", "Asia/Dubai": "AED", "Asia/Qatar": "QAR",
+  "Asia/Kuwait": "KWD", "Asia/Bahrain": "BHD", "Asia/Muscat": "OMR", "Asia/Amman": "JOD", "Asia/Baghdad": "IQD", "Asia/Tehran": "IRR", "Asia/Kabul": "AFN",
+  "Asia/Kuala_Lumpur": "MYR", "Asia/Jakarta": "IDR", "Asia/Makassar": "IDR", "Asia/Singapore": "SGD", "Asia/Tashkent": "UZS", "Asia/Almaty": "KZT", "Asia/Baku": "AZN",
+  "Europe/Istanbul": "TRY", "Africa/Cairo": "EGP", "Africa/Lagos": "NGN", "Africa/Casablanca": "MAD", "Africa/Algiers": "DZD", "Africa/Tunis": "TND", "Africa/Nairobi": "KES",
+  "Africa/Johannesburg": "ZAR", "Asia/Colombo": "LKR", "Asia/Kathmandu": "NPR", "Asia/Manila": "PHP", "Asia/Bangkok": "THB", "Europe/London": "GBP", "America/Toronto": "CAD", "America/Vancouver": "CAD", "Australia/Sydney": "AUD", "Australia/Melbourne": "AUD",
+};
+const EURO_ZONES = /^Europe\/(Berlin|Paris|Madrid|Rome|Amsterdam|Brussels|Vienna|Dublin|Lisbon|Helsinki|Athens|Luxembourg|Bratislava|Ljubljana|Tallinn|Riga|Vilnius|Valletta|Zagreb)$/;
+
+function currencyFromZone(): string | null {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (TZ[tz]) return TZ[tz];
+  if (EURO_ZONES.test(tz)) return "EUR";
+  if (/^America\/(New_York|Chicago|Denver|Los_Angeles|Phoenix|Anchorage|Detroit)|^Pacific\/Honolulu/.test(tz)) return "USD";
+  return null;
+}
+
+interface Rates { goldUsdOz: number; silverUsdOz: number; fx: Record<string, number>; at: number }
+const ratesStore = createLocalStore<Rates | null>("zakat-rates", null);
+
+interface S {
+  currency: string; nisab: "silver" | "gold"; goldPrice: string; silverPrice: string;
+  cash: string; bank: string; goldG: string; karat: string; silverG: string; investments: string; business: string; receivables: string; other: string;
+  debts: string; bills: string;
+}
+const EMPTY: S = { currency: "", nisab: "silver", goldPrice: "", silverPrice: "", cash: "", bank: "", goldG: "", karat: "24", silverG: "", investments: "", business: "", receivables: "", other: "", debts: "", bills: "" };
+const store = createLocalStore<S>("zakat-calculator", EMPTY, (r) => ({ ...EMPTY, ...(r as Partial<S>) }));
+const n = (s: string) => Math.max(0, parseFloat(s.replace(/,/g, "")) || 0);
+
+const ASSETS: [keyof S, string, string?][] = [
+  ["cash", "Cash in hand"],
+  ["bank", "Bank balances", "Current, savings and deposit accounts"],
+  ["investments", "Shares, funds & crypto", "Market value of tradable holdings"],
+  ["business", "Business stock", "Inventory at sale value, plus business cash"],
+  ["receivables", "Money owed to you", "Loans you expect to be repaid"],
+  ["other", "Other savings", "Pension withdrawable now, rental income saved…"],
+];
 
 export default function ZakatCalculator() {
-  const [currency, setCurrency] = useState("USD");
-  const [goldPrice, setGoldPrice] = useState("65");
-  const [silverPrice, setSilverPrice] = useState("0.85");
-  const [nisabType, setNisabType] = useState<"gold" | "silver">("silver");
-  const [marketRates, setMarketRates] = useState<Record<string, { gold: string; silver: string }>>({});
-  const [loadingRates, setLoadingRates] = useState(true);
+  const mounted = useMounted();
+  const [s, setS] = useLocalStore(store);
+  const [rates, setRates] = useLocalStore(ratesStore);
+  const [detected, setDetected] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const set = (k: keyof S) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setS((x) => ({ ...x, [k]: e.target.value }));
 
-  const [cash, setCash] = useState("");
-  const [bankBalance, setBankBalance] = useState("");
-  const [gold, setGold] = useState("");
-  const [silver, setSilver] = useState("");
-  const [investments, setInvestments] = useState("");
-  const [businessAssets, setBusinessAssets] = useState("");
-  const [otherAssets, setOtherAssets] = useState("");
-  const [debts, setDebts] = useState("");
-  const [loans, setLoans] = useState("");
+  const fetchRates = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [g, sv, fx] = await Promise.all(["https://api.gold-api.com/price/XAU", "https://api.gold-api.com/price/XAG", "https://open.er-api.com/v6/latest/USD"].map((u) => fetch(u).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })));
+      if (!(g.price > 0 && sv.price > 0 && fx.rates)) throw new Error("Unexpected response");
+      setRates({ goldUsdOz: g.price, silverUsdOz: sv.price, fx: fx.rates, at: Date.now() });
+    } catch {
+      setError("Couldn't load live prices. Check your connection and retry, or enter today's prices below.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  // Detect currency (time zone, then IP lookup) and load prices (cached for an hour).
   useEffect(() => {
-    const fetchRates = async () => {
-      try {
-        const [goldRes, silverRes, xrRes] = await Promise.all([
-          fetch("https://api.gold-api.com/price/XAU/USD"),
-          fetch("https://api.gold-api.com/price/XAG/USD"),
-          fetch("https://open.er-api.com/v6/latest/USD"),
-        ]);
-        const goldData = await goldRes.json();
-        const silverData = await silverRes.json();
-        const xrData = await xrRes.json();
-
-        if (goldData.price && silverData.price && xrData.rates) {
-          const TROY_OZ_TO_GRAM = 31.1034768;
-          const usdGoldPerGram = goldData.price / TROY_OZ_TO_GRAM;
-          const usdSilverPerGram = silverData.price / TROY_OZ_TO_GRAM;
-
-          const rates: Record<string, { gold: string; silver: string }> = {};
-
-          Object.keys(xrData.rates).forEach((c) => {
-            const rate = xrData.rates[c];
-            rates[c] = {
-              gold: (usdGoldPerGram * rate).toFixed(2),
-              silver: (usdSilverPerGram * rate).toFixed(2),
-            };
-          });
-
-          setMarketRates(rates);
-          setLoadingRates(false);
-        }
-      } catch {
-        setMarketRates({ USD: { gold: "137.00", silver: "2.10" }, EUR: { gold: "120.00", silver: "1.82" }, GBP: { gold: "102.00", silver: "1.57" }, PKR: { gold: "38000", silver: "582" }, INR: { gold: "11650", silver: "178" } });
-        setLoadingRates(false);
-      }
-    };
-    const detectCurrency = async () => {
-      try { const res = await fetch("https://ipapi.co/currency/"); const detected = await res.text(); if (detected && detected.length === 3) setCurrency(detected); } catch { /* ignore */ }
-    };
-    fetchRates(); detectCurrency();
+    if (!s.currency) {
+      const tz = currencyFromZone();
+      if (tz) setTimeout(() => setDetected(tz), 0);
+      else fetch("https://ipapi.co/currency/").then((r) => r.text()).then((c) => /^[A-Z]{3}$/.test(c.trim()) && setDetected(c.trim())).catch(() => {});
+    }
+    const cached = ratesStore.get();
+    if (!cached || Date.now() - cached.at > CACHE_MS) setTimeout(fetchRates, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => { if (marketRates[currency]) { setGoldPrice(marketRates[currency].gold.toString()); setSilverPrice(marketRates[currency].silver.toString()); } }, [currency, marketRates]);
+  const currency = s.currency || detected || "USD";
+  const fx = rates?.fx[currency];
+  const money = (v: number) => (mounted ? new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 2 }).format(v) : v.toFixed(2));
 
-  const getCurrencySymbol = (code: string) => { try { return (0).toLocaleString("en-US", { style: "currency", currency: code, minimumFractionDigits: 0, maximumFractionDigits: 0 }).replace(/\d/g, "").trim(); } catch { return code; } };
-  const currentSymbol = getCurrencySymbol(currency);
+  // Live prices per gram in the chosen currency; manual entry only if live data is unavailable.
+  const live = rates && fx ? { gold: (rates.goldUsdOz / TROY_OZ_G) * fx, silver: (rates.silverUsdOz / TROY_OZ_G) * fx } : null;
+  const gp = live ? live.gold : n(s.goldPrice);
+  const sp = live ? live.silver : n(s.silverPrice);
+  const goldValue = n(s.goldG) * KARAT[s.karat] * gp;
+  const silverValue = n(s.silverG) * sp;
+  const assets = ASSETS.reduce((t, [k]) => t + n(s[k]), 0) + goldValue + silverValue;
+  const liabilities = n(s.debts) + n(s.bills);
+  const net = Math.max(0, assets - liabilities);
+  const nisab = s.nisab === "gold" ? NISAB_GOLD_G * gp : NISAB_SILVER_G * sp;
+  const priced = s.nisab === "gold" ? gp > 0 : sp > 0;
+  const due = priced && net >= nisab;
+  const zakat = due ? net * 0.025 : 0;
 
-  const getNisabThreshold = () => { const gp = parseFloat(goldPrice) || 0; const sp = parseFloat(silverPrice) || 0; return nisabType === "gold" ? 87.48 * gp : 612.36 * sp; };
-  const getTotalAssets = () => {
-    const goldVal = (parseFloat(gold) || 0) * (parseFloat(goldPrice) || 0);
-    const silverVal = (parseFloat(silver) || 0) * (parseFloat(silverPrice) || 0);
-    return (parseFloat(cash) || 0) + (parseFloat(bankBalance) || 0) + goldVal + silverVal + (parseFloat(investments) || 0) + (parseFloat(businessAssets) || 0) + (parseFloat(otherAssets) || 0);
-  };
-  const getTotalLiabilities = () => (parseFloat(debts) || 0) + (parseFloat(loans) || 0);
+  const money$ = (k: keyof S, label: string, hint?: string) => (
+    <Field key={k} label={label} hint={hint} htmlFor={`z-${k}`}>
+      <Input id={`z-${k}`} value={s[k]} onChange={set(k)} inputMode="decimal" placeholder="0" className="text-right font-mono" />
+    </Field>
+  );
 
-  const totalAssets = getTotalAssets();
-  const totalLiabilities = getTotalLiabilities();
-  const zakatableWealth = Math.max(0, totalAssets - totalLiabilities);
-  const nisabThreshold = getNisabThreshold();
-  const isZakatDue = zakatableWealth >= nisabThreshold;
-  const zakatAmount = isZakatDue ? zakatableWealth * 0.025 : 0;
-
-  const formatVal = (v: number) => `${currentSymbol} ${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-  const handleReset = () => { setCash(""); setBankBalance(""); setGold(""); setSilver(""); setInvestments(""); setBusinessAssets(""); setOtherAssets(""); setDebts(""); setLoans(""); };
+  const options = (
+    <ToolPanel
+      title="Prices & nisab"
+      bodyClassName="p-3 space-y-3"
+      footer={<p className="text-[11px] text-muted-foreground">Live spot prices from gold-api.com, exchange rates from open.er-api.com. Your amounts never leave this browser.</p>}
+    >
+      <Field label="Currency" hint={!s.currency && detected ? "Detected automatically" : undefined} htmlFor="z-cur">
+        <select id="z-cur" value={currency} onChange={set("currency")} className="h-(--control-h) w-full rounded-md border border-input bg-card px-2 text-sm dark:bg-input/30">
+          {[...new Set([currency, ...CURRENCIES, ...Object.keys(rates?.fx ?? {})])].map((c) => <option key={c}>{c}</option>)}
+        </select>
+      </Field>
+      {live ? (
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <Stat label="Gold / gram (24k)" value={money(live.gold)} />
+            <Stat label="Silver / gram" value={money(live.silver)} />
+          </div>
+          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>Updated {mounted && rates ? new Date(rates.at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : ""}</span>
+            <Button variant="ghost" size="sm" onClick={fetchRates} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} /> Refresh</Button>
+          </div>
+        </div>
+      ) : loading ? (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground"><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Loading live gold and silver prices…</p>
+      ) : (
+        <>
+          {error && <ToolAlert tone="warning">{error}</ToolAlert>}
+          {rates && !fx && <ToolAlert tone="warning">No exchange rate available for {currency}.</ToolAlert>}
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Gold price / gram (24k)" htmlFor="z-gp"><Input id="z-gp" value={s.goldPrice} onChange={set("goldPrice")} inputMode="decimal" className="font-mono" /></Field>
+            <Field label="Silver price / gram" htmlFor="z-sp"><Input id="z-sp" value={s.silverPrice} onChange={set("silverPrice")} inputMode="decimal" className="font-mono" /></Field>
+          </div>
+          <Button variant="outline" size="sm" onClick={fetchRates}><RefreshCw /> Retry live prices</Button>
+        </>
+      )}
+      <Field label="Nisab standard" hint={s.nisab === "silver" ? `${NISAB_SILVER_G} g silver — lower threshold, recommended by many scholars as it benefits more recipients.` : `${NISAB_GOLD_G} g gold (7.5 tola).`}>
+        <Segmented size="sm" value={s.nisab} onChange={(v) => setS((x) => ({ ...x, nisab: v }))} options={[{ value: "silver", label: "Silver" }, { value: "gold", label: "Gold" }]} />
+      </Field>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="zakat-calculator">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        <div className="lg:col-span-4 lg:order-last space-y-6">
-          <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-sm">
-            <Button onClick={handleReset} variant="outline" className="w-full h-12 border-border hover:bg-accent text-muted-foreground hover:text-foreground font-bold uppercase tracking-widest text-xs">
-              <RotateCcw className="w-4 h-4 mr-2" /> Reset All Fields
-            </Button>
+      <OptionsLayout options={options}>
+        <ToolPanel bodyClassName="p-5 flex flex-wrap items-center gap-4">
+          <div className="flex-1 min-w-48">
+            <p className="text-xs text-muted-foreground">Zakat due (2.5%)</p>
+            <p className="text-4xl font-semibold tabular-nums">{money(zakat)}</p>
           </div>
-          <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-sm">
-            <h3 className="text-sm font-bold text-foreground uppercase tracking-wide">Market Rates</h3>
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Your Currency</label>
-              {loadingRates ? <div className="h-12 w-full bg-muted rounded-xl animate-pulse" /> : (
-                <div className="relative">
-                  <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-card border border-border rounded-xl focus:ring-4 focus:ring-primary/5 focus:border-primary outline-none transition-all text-sm font-bold appearance-none cursor-pointer">
-                    {Object.keys(marketRates).sort().map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <Globe className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                </div>
-              )}
+          {!priced ? <StatusBadge tone="warning">{loading ? "Loading prices…" : `${s.nisab} price unavailable`}</StatusBadge> : due ? <StatusBadge tone="success">Above nisab — zakat is due</StatusBadge> : <StatusBadge>Below nisab — no zakat due</StatusBadge>}
+        </ToolPanel>
+        <StatGrid>
+          <Stat label="Total assets" value={money(assets)} />
+          <Stat label="Deductions" value={money(liabilities)} />
+          <Stat label="Net zakatable" value={money(net)} />
+          <Stat label="Nisab" value={priced ? money(nisab) : "—"} hint={s.nisab} />
+        </StatGrid>
+        <ToolPanel title="Assets held for a lunar year" bodyClassName="p-3 grid gap-3 sm:grid-cols-2">
+          {ASSETS.map(([k, l, h]) => money$(k, l, h))}
+          <Field label="Gold owned (grams)" hint={goldValue ? `≈ ${money(goldValue)}` : "Jewellery, coins, bars"} htmlFor="z-gg">
+            <div className="flex gap-1.5">
+              <Input id="z-gg" value={s.goldG} onChange={set("goldG")} inputMode="decimal" placeholder="0" className="text-right font-mono" />
+              <select value={s.karat} onChange={set("karat")} aria-label="Karat" className="h-(--control-h) rounded-md border border-input bg-card px-2 text-sm dark:bg-input/30">{Object.keys(KARAT).map((k) => <option key={k} value={k}>{k}k</option>)}</select>
             </div>
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Today's Prices (per gram)</label>
-              <div className="space-y-2">
-                <div className="relative"><input type="number" value={goldPrice} onChange={(e) => setGoldPrice(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-card border border-border rounded-xl text-sm font-mono font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary outline-none transition-all" placeholder="Gold Price" /><Gem className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" /><span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">GOLD</span></div>
-                <div className="relative"><input type="number" value={silverPrice} onChange={(e) => setSilverPrice(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-card border border-border rounded-xl text-sm font-mono font-bold focus:ring-4 focus:ring-primary/5 focus:border-primary outline-none transition-all" placeholder="Silver Price" /><Coins className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /><span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">SILVER</span></div>
-              </div>
-            </div>
-          </div>
-          <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-sm">
-            <h3 className="text-sm font-bold text-foreground uppercase tracking-wide">Settings</h3>
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Your Threshold</label>
-              <div className="grid grid-cols-2 gap-2 p-1 bg-muted rounded-xl">
-                {["silver", "gold"].map((type) => (
-                  <button key={type} onClick={() => setNisabType(type as any)} className={`py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${nisabType === type ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{type}</button>
-                ))}
-              </div>
-              <div className="flex items-center justify-between pt-2 px-1"><span className="text-[11px] text-muted-foreground">Current Threshold:</span><span className="text-sm font-mono font-bold text-foreground">{formatVal(nisabThreshold)}</span></div>
-            </div>
-          </div>
-        </div>
-
-        <div className="lg:col-span-8 space-y-6">
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
-            <section className="bg-card border border-border rounded-3xl p-6 shadow-sm relative overflow-hidden">
-              <div className="flex items-center gap-3 mb-4 border-b border-border pb-4">
-                <div className="p-2 bg-emerald-100 rounded-xl"><Wallet className="w-5 h-5 text-emerald-600" /></div>
-                <div><h3 className="text-lg font-black text-foreground">What You Own</h3><p className="text-xs text-muted-foreground font-medium">Wealth held for a full year.</p></div>
-                <div className="ml-auto text-right"><p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Your Assets</p><p className="text-lg font-black text-emerald-600 tabular-nums">{formatVal(totalAssets)}</p></div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <AssetInput label="Cash on Hand" value={cash} onChange={setCash} icon={<CircleDollarSign className="w-3.5 h-3.5" />} symbol={currentSymbol} placeholder="0" />
-                <AssetInput label="Bank Balances" value={bankBalance} onChange={setBankBalance} icon={<Building2 className="w-3.5 h-3.5" />} symbol={currentSymbol} placeholder="0" />
-                <AssetInput label="Investments" value={investments} onChange={setInvestments} icon={<TrendingUp className="w-3.5 h-3.5" />} symbol={currentSymbol} placeholder="0" />
-                <AssetInput label="Other Assets" value={otherAssets} onChange={setOtherAssets} icon={<ArrowRight className="w-3.5 h-3.5" />} symbol={currentSymbol} placeholder="0" />
-                <div className="col-span-full h-px bg-muted my-1" />
-                <AssetInput label="Gold (g)" value={gold} onChange={setGold} icon={<Gem className="w-3.5 h-3.5" />} suffix="g" subLabel={gold ? `≈ ${formatVal((parseFloat(gold) || 0) * (parseFloat(goldPrice) || 0))}` : undefined} placeholder="0" />
-                <AssetInput label="Silver (g)" value={silver} onChange={setSilver} icon={<Coins className="w-3.5 h-3.5" />} suffix="g" subLabel={silver ? `≈ ${formatVal((parseFloat(silver) || 0) * (parseFloat(silverPrice) || 0))}` : undefined} placeholder="0" />
-              </div>
-            </section>
-            <div className="space-y-4">
-              <section className="bg-card border border-border rounded-3xl p-6 shadow-sm relative overflow-hidden">
-                <div className="flex items-center gap-3 mb-4 border-b border-border pb-4">
-                  <div className="p-2 bg-rose-100 rounded-xl"><HandCoins className="w-5 h-5 text-rose-600" /></div>
-                  <div><h3 className="text-lg font-black text-foreground">What You Owe</h3><p className="text-xs text-muted-foreground font-medium">Money you need to pay back.</p></div>
-                  <div className="ml-auto text-right"><p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Your Debts</p><p className="text-lg font-black text-rose-600 tabular-nums">{formatVal(totalLiabilities)}</p></div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <AssetInput label="Debts Payable" value={debts} onChange={setDebts} icon={<AlertCircle className="w-3.5 h-3.5" />} symbol={currentSymbol} theme="rose" placeholder="0" />
-                  <AssetInput label="Short-term Loans" value={loans} onChange={setLoans} icon={<HandCoins className="w-3.5 h-3.5" />} symbol={currentSymbol} theme="rose" placeholder="0" />
-                </div>
-              </section>
-              <div className="flex items-center justify-center gap-2 text-muted-foreground opacity-60 py-2"><Lock className="w-3 h-3" /><p className="text-[10px] font-medium uppercase tracking-widest">Privacy First</p></div>
-            </div>
-          </div>
-
-          <div className={`rounded-[2rem] p-6 text-primary-foreground shadow-xl relative overflow-hidden transition-all duration-500 ${isZakatDue ? "bg-gradient-to-br from-emerald-600 to-teal-700" : "bg-gradient-to-br from-slate-700 to-slate-800"}`}>
-            <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none"><HandCoins className="w-64 h-64 -mr-16 -mt-16" /></div>
-            <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <p className="text-xs font-bold opacity-70 uppercase tracking-widest">Zakat to Pay</p>
-                  <div className="text-5xl sm:text-6xl font-black tracking-tight tabular-nums">{isZakatDue ? formatVal(zakatAmount) : formatVal(0)}</div>
-                </div>
-                <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold backdrop-blur-md transition-colors ${isZakatDue ? "bg-emerald-500/20 border border-emerald-400/30 text-emerald-50" : "bg-card/5 border border-white/10 text-muted-foreground"}`}>
-                  {isZakatDue ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}{isZakatDue ? "Zakat is due" : "No zakat due"}
-                </div>
-              </div>
-              <div className="bg-black/20 rounded-2xl p-5 backdrop-blur-md border border-white/10 space-y-4">
-                <div className="space-y-3">
-                  <div className="flex justify-between items-baseline"><span className="text-[10px] font-bold uppercase tracking-widest opacity-60">Net Wealth</span><span className="text-xl font-black tabular-nums">{formatVal(zakatableWealth)}</span></div>
-                  <div className="h-1.5 bg-card/10 rounded-full overflow-hidden">
-                    <div className={`h-full ${isZakatDue ? "bg-emerald-400" : "bg-muted"}`} style={{ width: `${Math.min(100, (zakatableWealth / (Math.max(zakatableWealth, nisabThreshold) * 1.5)) * 100)}%` }} />
-                  </div>
-                  <div className="flex justify-between items-center text-[10px] opacity-50 font-medium"><span>0</span><span>Threshold: {formatVal(nisabThreshold)}</span></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+          </Field>
+          <Field label="Silver owned (grams)" hint={silverValue ? `≈ ${money(silverValue)}` : undefined} htmlFor="z-sg"><Input id="z-sg" value={s.silverG} onChange={set("silverG")} inputMode="decimal" placeholder="0" className="text-right font-mono" /></Field>
+        </ToolPanel>
+        <ToolPanel title="Deductions" bodyClassName="p-3 grid gap-3 sm:grid-cols-2">
+          {money$("debts", "Debts due now", "Loan instalments and money owed that are currently payable")}
+          {money$("bills", "Unpaid bills", "Rent, utilities, taxes and wages due")}
+        </ToolPanel>
+        <p className="text-[11px] text-muted-foreground">A general guide following common scholarly positions. Treatment of jewellery for personal use, pensions and long-term debts differs between schools — consult a scholar for your situation.</p>
+      </OptionsLayout>
     </ToolLayout>
-  );
-}
-
-function AssetInput({ label, value, onChange, icon, symbol, suffix, subLabel, theme = "emerald", placeholder }: { label: string; value: string; onChange: (v: string) => void; icon: React.ReactNode; symbol?: string; suffix?: string; subLabel?: string; theme?: "emerald" | "rose"; placeholder?: string }) {
-  return (
-    <div className="space-y-1 group">
-      <label className="text-[10px] font-bold text-muted-foreground flex items-center gap-2 ml-1 uppercase tracking-wider scale-95 origin-left group-hover:text-foreground transition-colors">{icon}{label}</label>
-      <div className="relative transition-all duration-300 group-focus-within:scale-[1.01]">
-        {symbol && <span className={`absolute left-4 top-1/2 -translate-y-1/2 text-sm font-bold ${theme === "rose" ? "text-rose-400" : "text-emerald-500"}`}>{symbol}</span>}
-        <input type="number" value={value} onChange={(e) => onChange(e.target.value)} className={`w-full ${symbol ? "pl-14" : "pl-4"} pr-12 py-2.5 bg-muted border border-border rounded-xl outline-none transition-all focus:bg-card focus:ring-4 ${theme === "rose" ? "focus:ring-rose-500/10 focus:border-rose-200" : "focus:ring-emerald-500/10 focus:border-emerald-200"} text-sm font-bold font-mono text-foreground placeholder:text-muted-foreground shadow-sm`} placeholder={placeholder} />
-        {suffix && <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-muted-foreground uppercase">{suffix}</span>}
-      </div>
-      {subLabel && <p className="text-[10px] text-muted-foreground ml-2 font-medium">{subLabel}</p>}
-    </div>
   );
 }
