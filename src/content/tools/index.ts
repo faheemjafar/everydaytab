@@ -64,9 +64,8 @@ import colorTemperature from "./color-temperature";
 import compressor from "./compressor";
 import jsonGo from "./json-go";
 import muteVideo from "./mute-video";
-import ogDebugger from "./og-debugger";
+import opengraphContent from "./opengraph";
 import pageNumbers from "./page-numbers";
-import pdfIntegrity from "./pdf-integrity";
 import removeBlankPages from "./remove-blank-pages";
 import ringtoneMaker from "./ringtone-maker";
 import rsaGenerator from "./rsa-generator";
@@ -145,9 +144,8 @@ const registry: Record<string, ToolContent> = {
   compressor: compressor,
   "json-go": jsonGo,
   "mute-video": muteVideo,
-  "og-debugger": ogDebugger,
+  "opengraph": opengraphContent,
   "page-numbers": pageNumbers,
-  "pdf-integrity": pdfIntegrity,
   "remove-blank-pages": removeBlankPages,
   "ringtone-maker": ringtoneMaker,
   "rsa-generator": rsaGenerator,

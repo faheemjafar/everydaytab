@@ -59,7 +59,7 @@ const content: ToolContent = {
       answer: "No. They live only in the page while you use it and are never logged, transmitted or saved.",
     },
   ],
-  related: ["base64", "jwt-generator", "token-generator", "curl-converter", "http-status-codes", "hmac-generator"],
+  related: ["base64", "jwt-debugger", "token-generator", "curl-converter", "http-status-codes", "hmac-generator"],
 };
 
 export default content;

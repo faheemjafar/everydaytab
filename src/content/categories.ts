@@ -111,7 +111,7 @@ export const categoryContent: Record<string, CategoryContent> = {
     intro: [
       "SEO tools built by people who use them: generate title and meta description tags, Open Graph and Twitter card markup, FAQ schema, robots.txt and XML sitemaps; extract and check keyword density; analyse readability; slugify URLs; and debug how a page's Open Graph tags will render.",
     ],
-    featured: ["meta-tag-generator", "keywords", "faq-schema", "opengraph", "robots", "sitemap", "url-slug", "og-debugger"],
+    featured: ["meta-tag-generator", "keywords", "faq-schema", "opengraph", "robots", "sitemap", "slugify"],
     faqs: [
       { question: "Will structured data from the FAQ schema generator get me rich results?", answer: "It produces valid schema.org FAQPage JSON-LD. Google decides whether to show rich results based on page quality and eligibility; validate the output with Google's Rich Results Test after publishing." },
     ],
@@ -142,7 +142,7 @@ export const categoryContent: Record<string, CategoryContent> = {
       "Security utilities for developers and admins: generate and verify hashes and HMACs, encrypt and decrypt with AES, hash and check bcrypt passwords, generate RSA key pairs, create and decode JWTs, produce TOTP codes, generate BIP39 mnemonics, decode SSL certificates and test password strength.",
       "Because these tools handle sensitive material, they are built to run entirely in your browser — keys and plaintext never leave your device.",
     ],
-    featured: ["hash-generator", "aes-encryption", "bcrypt", "rsa-generator", "jwt-generator", "otp-generator", "password-strength", "ssl-decoder"],
+    featured: ["hash-generator", "aes-encryption", "bcrypt", "rsa-generator", "jwt-debugger", "otp-generator", "password-strength", "ssl-decoder"],
     faqs: [
       { question: "Is it safe to encrypt real data here?", answer: "The cryptography runs locally with the Web Crypto API and audited libraries, and nothing is transmitted. As with any browser tool, use a trusted device and avoid public computers for sensitive work." },
     ],

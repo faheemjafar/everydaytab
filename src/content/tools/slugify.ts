@@ -55,7 +55,7 @@ const content: ToolContent = {
       answer: "Yes. The output contains only lowercase letters, digits, hyphens and underscores, which is valid in file systems, HTML ids and CSS class names.",
     },
   ],
-  related: ["url-slug", "url-encoder", "case-converter", "text-cleaner", "renamer", "meta-tag-generator"],
+  related: ["slugify", "url-encoder", "case-converter", "text-cleaner", "renamer", "meta-tag-generator"],
 };
 
 export default content;

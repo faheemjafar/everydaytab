@@ -61,7 +61,7 @@ const content: ToolContent = {
         "Yes. Every character has a Unicode code point, so text in any language is converted; combining marks and joined characters are output as their individual code points.",
     },
   ],
-  related: ["html-entities", "text-binary", "base64", "url-encoder", "string-obfuscator", "morse-code-converter"],
+  related: ["html-entities", "text-binary", "base64", "url-encoder", "morse-code-converter"],
 };
 
 export default content;

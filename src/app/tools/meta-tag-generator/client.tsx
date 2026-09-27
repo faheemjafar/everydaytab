@@ -1,220 +1,129 @@
 "use client";
 
+import { useState } from "react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { 
-  Globe, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  Eye,
-  FileCode,
-  Share2,
-  Search,
-  Image as ImageIcon
-} from "lucide-react";
+import { CodeOutput, ColorField, Field, OptionsLayout, Segmented, StatusBadge, ToolPanel, Toggle } from "@/components/tool";
+import { attr } from "@/lib/html-escape";
 import { cn } from "@/lib/utils";
 
+type Robots = "index,follow" | "noindex,follow" | "index,nofollow" | "noindex,nofollow";
+
+function Counter({ n, min, max }: { n: number; min: number; max: number }) {
+  return <span className={cn("tabular-nums", n === 0 ? "text-muted-foreground" : n < min || n > max ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400")}>{n}/{max}</span>;
+}
+
 export default function MetaTagGenerator() {
-  const [tags, setTags] = useState({
-    title: "EverydayTab - The Ultimate Utility Suite",
-    description: "All the professional tools you need in one sleek application. Fast, secure, and entirely client-side.",
-    url: "https://everydaytab.com",
-    image: "https://everydaytab.com/og-image.png",
-    twitterHandle: "@everydaytab_tools"
-  });
-  const [copied, setCopied] = useState(false);
+  const [title, setTitle] = useState("");
+  const [desc, setDesc] = useState("");
+  const [url, setUrl] = useState("");
+  const [image, setImage] = useState("");
+  const [siteName, setSiteName] = useState("");
+  const [author, setAuthor] = useState("");
+  const [twitter, setTwitter] = useState("");
+  const [lang, setLang] = useState("en");
+  const [robots, setRobots] = useState<Robots>("index,follow");
+  const [theme, setTheme] = useState("#0d9488");
+  const [social, setSocial] = useState(true);
 
-  const generateMeta = () => {
-    return `<!-- Primary Meta Tags -->
-<title>${tags.title}</title>
-<meta name="title" content="${tags.title}">
-<meta name="description" content="${tags.description}">
+  const t = title.trim();
+  const d = desc.trim();
+  const lines = [
+    `<meta charset="utf-8">`,
+    `<meta name="viewport" content="width=device-width, initial-scale=1">`,
+    t && `<title>${attr(t)}</title>`,
+    d && `<meta name="description" content="${attr(d)}">`,
+    url && `<link rel="canonical" href="${attr(url)}">`,
+    robots !== "index,follow" && `<meta name="robots" content="${robots}">`,
+    author && `<meta name="author" content="${attr(author)}">`,
+    theme && `<meta name="theme-color" content="${attr(theme)}">`,
+    ...(social
+      ? [
+          "",
+          "<!-- Open Graph -->",
+          `<meta property="og:type" content="website">`,
+          t && `<meta property="og:title" content="${attr(t)}">`,
+          d && `<meta property="og:description" content="${attr(d)}">`,
+          url && `<meta property="og:url" content="${attr(url)}">`,
+          image && `<meta property="og:image" content="${attr(image)}">`,
+          siteName && `<meta property="og:site_name" content="${attr(siteName)}">`,
+          lang && `<meta property="og:locale" content="${attr(lang.replace("-", "_"))}">`,
+          "",
+          "<!-- Twitter / X -->",
+          `<meta name="twitter:card" content="${image ? "summary_large_image" : "summary"}">`,
+          twitter && `<meta name="twitter:site" content="@${attr(twitter.replace(/^@/, ""))}">`,
+          t && `<meta name="twitter:title" content="${attr(t)}">`,
+          d && `<meta name="twitter:description" content="${attr(d)}">`,
+          image && `<meta name="twitter:image" content="${attr(image)}">`,
+        ]
+      : []),
+  ].filter((l) => l !== false && l !== undefined && l !== "") as string[];
+  // Keep intentional blank separators but drop empty trailing groups.
+  const html = lines.join("\n").replace(/\n{3,}/g, "\n\n");
+  const nextMetadata = `export const metadata = {\n${[t && `  title: ${JSON.stringify(t)},`, d && `  description: ${JSON.stringify(d)},`, url && `  alternates: { canonical: ${JSON.stringify(url)} },`, robots !== "index,follow" && `  robots: { index: ${!robots.startsWith("no")}, follow: ${!robots.endsWith("nofollow")} },`, social && `  openGraph: {${t ? ` title: ${JSON.stringify(t)},` : ""}${d ? ` description: ${JSON.stringify(d)},` : ""}${url ? ` url: ${JSON.stringify(url)},` : ""}${siteName ? ` siteName: ${JSON.stringify(siteName)},` : ""}${image ? ` images: [${JSON.stringify(image)}],` : ""} type: "website" },`, social && `  twitter: { card: ${JSON.stringify(image ? "summary_large_image" : "summary")}${twitter ? `, site: ${JSON.stringify("@" + twitter.replace(/^@/, ""))}` : ""} },`].filter(Boolean).join("\n")}\n};`;
 
-<!-- Open Graph / Facebook -->
-<meta property="og:type" content="website">
-<meta property="og:url" content="${tags.url}">
-<meta property="og:title" content="${tags.title}">
-<meta property="og:description" content="${tags.description}">
-<meta property="og:image" content="${tags.image}">
+  let host = "example.com";
+  let crumbs = "";
+  try {
+    const u = new URL(url);
+    host = u.hostname.replace(/^www\./, "");
+    crumbs = u.pathname.split("/").filter(Boolean).join(" › ");
+  } catch {
+    /* no url */
+  }
 
-<!-- Twitter -->
-<meta property="twitter:card" content="summary_large_image">
-<meta property="twitter:url" content="${tags.url}">
-<meta property="twitter:title" content="${tags.title}">
-<meta property="twitter:description" content="${tags.description}">
-<meta property="twitter:image" content="${tags.image}">
-${tags.twitterHandle ? `<meta name="twitter:site" content="${tags.twitterHandle}">` : ""}`;
-  };
-
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(generateMeta());
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const clear = () => {
-    setTags({
-      title: "",
-      description: "",
-      url: "",
-      image: "",
-      twitterHandle: ""
-    });
-  };
+  const options = (
+    <ToolPanel title="Page" bodyClassName="p-3 space-y-3">
+      <Field label={<span className="flex justify-between w-full">Title <Counter n={t.length} min={30} max={60} /></span>} htmlFor="mt-title">
+        <Input id="mt-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Page title — Brand" />
+      </Field>
+      <Field label={<span className="flex justify-between w-full">Description <Counter n={d.length} min={70} max={160} /></span>} htmlFor="mt-desc">
+        <Textarea id="mt-desc" value={desc} onChange={(e) => setDesc(e.target.value)} rows={3} placeholder="What the page is about, in one or two sentences." />
+      </Field>
+      <Field label="Canonical URL" htmlFor="mt-url">
+        <Input id="mt-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/page" className="font-mono" />
+      </Field>
+      <Field label="Search engines">
+        <Segmented size="sm" value={robots} onChange={setRobots} options={[{ value: "index,follow", label: "Index" }, { value: "noindex,follow", label: "No index" }, { value: "index,nofollow", label: "No follow" }, { value: "noindex,nofollow", label: "Neither" }]} />
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Author" htmlFor="mt-author"><Input id="mt-author" value={author} onChange={(e) => setAuthor(e.target.value)} /></Field>
+        <Field label="Language" htmlFor="mt-lang"><Input id="mt-lang" value={lang} onChange={(e) => setLang(e.target.value)} placeholder="en" className="font-mono" /></Field>
+      </div>
+      <ColorField label="Theme colour (mobile browser UI)" value={theme} onChange={setTheme} />
+      <Toggle label="Include Open Graph & Twitter tags" checked={social} onChange={setSocial} />
+      {social && (
+        <>
+          <Field label="Share image URL (1200×630)" htmlFor="mt-img"><Input id="mt-img" value={image} onChange={(e) => setImage(e.target.value)} placeholder="https://example.com/og.png" className="font-mono" /></Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Site name" htmlFor="mt-site"><Input id="mt-site" value={siteName} onChange={(e) => setSiteName(e.target.value)} /></Field>
+            <Field label="X / Twitter handle" htmlFor="mt-tw"><Input id="mt-tw" value={twitter} onChange={(e) => setTwitter(e.target.value)} placeholder="@brand" /></Field>
+          </div>
+        </>
+      )}
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="meta-tag-generator">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Editor Side */}
-        <div className="lg:col-span-5 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-6">
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Site Info</Label>
-                  <Button variant="ghost" size="sm" onClick={clear} className="h-8 rounded-xl font-bold text-destructive hover:bg-destructive/10">
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Clear
-                  </Button>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold">Page Title</Label>
-                  <Input 
-                    value={tags.title}
-                    onChange={(e) => setTags({...tags, title: e.target.value})}
-                    placeholder="e.g. My Awesome Site"
-                    className="h-12 rounded-xl bg-muted/30 border-border/40 font-bold"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold">Description</Label>
-                  <Textarea 
-                    value={tags.description}
-                    onChange={(e) => setTags({...tags, description: e.target.value})}
-                    placeholder="Short summary of your page..."
-                    className="rounded-xl bg-muted/30 border-border/40 h-24 resize-none"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold">Site URL</Label>
-                  <Input 
-                    value={tags.url}
-                    onChange={(e) => setTags({...tags, url: e.target.value})}
-                    placeholder="https://example.com"
-                    className="h-12 rounded-xl bg-muted/30 border-border/40 font-mono text-sm"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold">Image URL (OG Image)</Label>
-                  <Input 
-                    value={tags.image}
-                    onChange={(e) => setTags({...tags, image: e.target.value})}
-                    placeholder="https://example.com/og-image.png"
-                    className="h-12 rounded-xl bg-muted/30 border-border/40 font-mono text-sm"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold">Twitter Username (Optional)</Label>
-                  <Input 
-                    value={tags.twitterHandle}
-                    onChange={(e) => setTags({...tags, twitterHandle: e.target.value})}
-                    placeholder="@username"
-                    className="h-12 rounded-xl bg-muted/30 border-border/40 font-mono text-sm"
-                  />
-                </div>
+      <OptionsLayout options={options}>
+        <ToolPanel title="Google search preview" actions={robots.startsWith("noindex") ? <StatusBadge tone="warning">Won&apos;t appear in search</StatusBadge> : null}>
+          <div className="p-4 bg-white dark:bg-stone-900 max-w-[600px]">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="size-7 rounded-full bg-stone-200 dark:bg-stone-700 flex items-center justify-center text-[11px] font-semibold text-stone-600 dark:text-stone-300">{(siteName || host)[0]?.toUpperCase()}</span>
+              <div className="leading-tight">
+                <p className="text-[13px] text-stone-800 dark:text-stone-200">{siteName || host}</p>
+                <p className="text-[12px] text-stone-500">{host}{crumbs && ` › ${crumbs}`}</p>
               </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Preview & Output Side */}
-        <div className="lg:col-span-7 space-y-8">
-          {/* Visual Previews */}
-          <div className="space-y-6">
-            <div className="flex items-center gap-2">
-              <Eye className="w-4 h-4 text-primary" />
-              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Social Previews</span>
             </div>
-
-            <div className="grid grid-cols-1 gap-6">
-              {/* Google Preview */}
-              <Card className="border-border/40 bg-card/40 rounded-2xl overflow-hidden p-6 space-y-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <Search className="w-3 h-3 text-muted-foreground" />
-                  <span className="text-[10px] font-bold uppercase text-muted-foreground">Google Search</span>
-                </div>
-                <p className="text-sm text-[#1a0dab] hover:underline cursor-pointer font-medium truncate">{tags.title || "Page Title"}</p>
-                <p className="text-xs text-[#006621] truncate mb-1">{tags.url || "https://example.com"}</p>
-                <p className="text-xs text-[#4d5156] line-clamp-2 leading-relaxed">
-                  {tags.description || "The description will appear here as a snippet in search results..."}
-                </p>
-              </Card>
-
-              {/* Facebook/OG Preview */}
-              <Card className="border-border/40 bg-[#f0f2f5] dark:bg-card/40 rounded-xl overflow-hidden max-w-[500px]">
-                <div className="aspect-[1.91/1] bg-muted/20 relative overflow-hidden">
-                  {tags.image ? (
-                    <img src={tags.image} alt="OG Preview" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground/30 gap-2">
-                      <ImageIcon className="w-8 h-8" />
-                      <span className="text-[10px] font-bold">OG Image Missing</span>
-                    </div>
-                  )}
-                </div>
-                <div className="p-4 bg-white dark:bg-card/20 space-y-1 border-t border-border/10">
-                  <p className="text-[10px] uppercase text-muted-foreground tracking-wider truncate">
-                    {tags.url ? new URL(tags.url).hostname : "EXAMPLE.COM"}
-                  </p>
-                  <p className="text-sm font-bold text-foreground line-clamp-1">{tags.title || "Page Title"}</p>
-                  <p className="text-xs text-muted-foreground line-clamp-1">{tags.description || "Description snippet..."}</p>
-                </div>
-              </Card>
-            </div>
+            <p className="text-[19px] leading-snug text-[#1a0dab] dark:text-[#8ab4f8] truncate">{t ? (t.length > 60 ? `${t.slice(0, 58)}…` : t) : "Your page title appears here"}</p>
+            <p className="text-[13px] leading-relaxed text-stone-600 dark:text-stone-400 line-clamp-2">{d ? (d.length > 160 ? `${d.slice(0, 157)}…` : d) : "Your meta description appears here. Google may rewrite it if it doesn't match the search."}</p>
           </div>
-
-          {/* Code Output */}
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col">
-            <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <FileCode className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-primary">HTML Header Tags</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={copyToClipboard}
-                className={cn(
-                  "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                  copied && "text-green-500 hover:text-green-500"
-                )}
-              >
-                {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-                {copied ? "Copied" : "Copy Tags"}
-              </Button>
-            </div>
-            <CardContent className="p-0 flex-1 relative bg-primary/[0.01]">
-              <pre className="p-8 font-mono text-[10px] leading-relaxed overflow-auto whitespace-pre text-foreground/80 selection:bg-primary/20">
-                {generateMeta()}
-              </pre>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+        </ToolPanel>
+        <CodeOutput title="Code" tabs={[{ id: "html", label: "HTML <head>", code: html }, { id: "next", label: "Next.js metadata", code: nextMetadata }]} />
+        <p className="text-[11px] text-muted-foreground px-0.5">Titles over ~60 characters and descriptions over ~160 are usually truncated in results. Values are HTML-escaped automatically.</p>
+      </OptionsLayout>
     </ToolLayout>
   );
 }

@@ -61,7 +61,7 @@ const content: ToolContent = {
         "Copy the page's visible text and paste it in. Because the tool runs entirely in your browser it does not fetch URLs — which also means the content you analyse is never sent to a server.",
     },
   ],
-  related: ["readability-analyzer", "meta-tag-generator", "word-counter", "text-statistics", "url-slug", "faq-schema"],
+  related: ["readability-analyzer", "meta-tag-generator", "word-counter", "text-statistics", "slugify", "faq-schema"],
 };
 
 export default content;

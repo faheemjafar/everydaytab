@@ -70,7 +70,7 @@ const content: ToolContent = {
       answer: "No. Matching runs in your browser, so it is safe to test against logs, configuration and real data.",
     },
   ],
-  related: ["regex", "text-diff", "string-obfuscator", "url-parser", "json-formatter", "text-cleaner"],
+  related: ["regex", "text-diff", "url-parser", "json-formatter", "text-cleaner"],
 };
 
 export default content;

@@ -59,7 +59,7 @@ const content: ToolContent = {
         "Most services show a \"can't scan?\" link revealing the text key. Alternatively decode the QR image with a reader — the otpauth:// URI it contains has the secret in its secret= parameter.",
     },
   ],
-  related: ["token-generator", "hmac-generator", "password-generator", "qr-generator", "bip39", "jwt-generator"],
+  related: ["token-generator", "hmac-generator", "password-generator", "qr-generator", "jwt-debugger"],
 };
 
 export default content;

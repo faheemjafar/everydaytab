@@ -1,11 +1,11 @@
 import type { ToolContent } from "./types";
 
 const content: ToolContent = {
-  seoTitle: "Open Graph Debugger – Preview & Test OG Tags for Any URL, Free",
+  seoTitle: "Open Graph Generator & Preview – OG and Twitter Card Tags, Free",
   seoDescription:
-    "Check how a link will look when shared on Facebook, LinkedIn, X, Slack and WhatsApp. Enter a URL to fetch its Open Graph and Twitter Card tags and preview the title, description and image.",
+    "Generate Open Graph and Twitter Card meta tags and preview how your link will look on Facebook, LinkedIn, X, Slack and WhatsApp. Paste existing page HTML to audit its tags. Runs in your browser.",
   intro:
-    "Enter any public URL and see the Open Graph metadata that social networks and chat apps will read from it — og:title, og:description, og:image, og:url and Twitter Card tags — rendered as the preview card users will actually see. Catch missing images, truncated titles and wrong descriptions before you hit publish, without having to post a test link anywhere.",
+    "Fill in a title, description, image and URL and get copy-ready og: and twitter: tags, with live previews of the cards each platform will render. Already have a page? Paste its HTML source to extract and audit the tags it contains — missing images, over-long titles and absent Twitter Card tags are flagged — without sending the URL or page to any third-party service.",
   sections: [
     {
       heading: "What Open Graph tags do",
@@ -61,7 +61,7 @@ const content: ToolContent = {
       answer: "Use the Open Graph Generator or Meta Tag Generator on EverydayTab to produce a complete, correctly formatted tag block to paste into your <head>.",
     },
   ],
-  related: ["opengraph", "meta-tag-generator", "faq-schema", "sitemap", "robots", "url-parser"],
+  related: ["meta-tag-generator", "faq-schema", "sitemap", "robots", "url-parser"],
 };
 
 export default content;

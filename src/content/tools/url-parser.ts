@@ -60,7 +60,7 @@ const content: ToolContent = {
       answer: "No. Parsing uses your browser's built-in URL API; nothing is transmitted.",
     },
   ],
-  related: ["url-encoder", "slugify", "og-debugger", "base64", "jwt-debugger", "user-agent-parser"],
+  related: ["url-encoder", "slugify", "opengraph", "base64", "jwt-debugger", "user-agent-parser"],
 };
 
 export default content;

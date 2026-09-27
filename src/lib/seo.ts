@@ -44,8 +44,6 @@ const CATEGORY_EXTRA_KEYWORDS: Record<string, string[]> = {
 // consolidates the two URLs instead of choosing between them.
 export const CANONICAL_TOOL: Record<string, string> = {
   "md-table-generator": "markdown-table-generator",
-  "url-slug": "slugify",
-  "meta-tags": "meta-tag-generator",
 };
 
 export function getCanonicalToolId(toolId: string): string {

@@ -65,7 +65,7 @@ const content: ToolContent = {
         "Ed25519 and ECDSA P-256 offer equivalent security with much smaller, faster keys and are preferred for SSH and new JWT deployments (EdDSA/ES256). Choose RSA when the consuming system only supports RS256 or RSA certificates.",
     },
   ],
-  related: ["jwt-generator", "ssl-decoder", "aes-encryption", "hash-generator", "hmac-generator", "bcrypt"],
+  related: ["jwt-debugger", "ssl-decoder", "aes-encryption", "hash-generator", "hmac-generator", "bcrypt"],
 };
 
 export default content;

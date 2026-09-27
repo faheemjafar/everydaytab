@@ -62,7 +62,7 @@ const content: ToolContent = {
       answer: "Use the File Compressor tool on EverydayTab to bundle files into a ZIP archive, also entirely in your browser.",
     },
   ],
-  related: ["compressor", "renamer", "base64-file", "pdf-integrity", "image-converter"],
+  related: ["compressor", "renamer", "base64-file", "image-converter"],
 };
 
 export default content;
