@@ -58,7 +58,7 @@ const content: ToolContent = {
       answer: "Because your time zone is ahead of or behind UTC. 2026-03-05T23:30Z is already 6 March in time zones east of UTC+0:30 — both values represent the same instant.",
     },
   ],
-  related: ["timestamp-converter", "time-zone-converter", "datetime-hub", "date-calculator", "time-duration-converter", "age-calculator"],
+  related: ["timestamp-converter", "time-zone-converter", "date-calculator", "time-duration-converter", "age-calculator"],
 };
 
 export default content;

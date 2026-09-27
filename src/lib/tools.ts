@@ -369,33 +369,6 @@ export const tools: Tool[] = [
 
   // Developer Tools
   {
-    id: 'modern-color',
-    name: 'Modern Color Converter',
-    description: 'Convert between HEX, RGB, HSL, OKLCH, LAB, and LCH',
-    category: 'color',
-    icon: 'Pipette',
-    path: '/tools/modern-color',
-    tags: ['color', 'hex', 'rgb', 'hsl', 'oklch', 'lab', 'lch', 'modern color converter', 'oklch converter', 'lab color converter', 'lch color converter', 'advanced color converter'],
-  },
-  {
-    id: 'barcode-studio',
-    name: 'Barcode Studio',
-    description: 'Generate Code128, EAN, UPC barcodes',
-    category: 'generator',
-    icon: 'Barcode',
-    path: '/tools/barcode-studio',
-    tags: ['barcode', 'ean', 'upc', 'code128', 'retail', 'barcode generator', 'free barcode generator', 'online barcode maker', 'ean barcode generator', 'upc barcode generator'],
-  },
-  {
-    id: 'datetime-hub',
-    name: 'DateTime Hub',
-    description: 'Advanced timezone and date calculator',
-    category: 'math',
-    icon: 'Clock',
-    path: '/tools/datetime-hub',
-    tags: ['date', 'time', 'timezone', 'calculator', 'timezone calculator', 'date calculator', 'time converter', 'online datetime tool'],
-  },
-  {
     id: 'html-markdown',
     name: 'HTML to Markdown',
     description: 'Convert HTML code to Markdown syntax',
@@ -639,15 +612,6 @@ export const tools: Tool[] = [
     tags: ['css', 'gradient', 'design', 'ui', 'css gradient generator', 'linear gradient generator', 'radial gradient generator', 'gradient maker', 'css background gradient'],
   },
   {
-    id: 'md-table-generator',
-    name: 'Markdown Table Generator',
-    description: 'Visually build Markdown tables',
-    category: 'text',
-    icon: 'Table',
-    path: '/tools/md-table-generator',
-    tags: ['markdown', 'table', 'documentation', 'generator', 'markdown table generator', 'md table maker', 'markdown table creator', 'online markdown table'],
-  },
-  {
     id: 'json-schema',
     name: 'JSON Schema Generator',
     description: 'Generate JSON Schema from JSON data',
@@ -745,15 +709,6 @@ export const tools: Tool[] = [
     icon: 'Clock',
     path: '/tools/eta-calculator',
     tags: ['eta', 'time', 'progress', 'calculate', 'eta calculator', 'estimated time arrival', 'arrival time calculator', 'online eta tool'],
-  },
-  {
-    id: 'math-evaluator',
-    name: 'Math Evaluator',
-    description: 'Evaluate complex math expressions',
-    category: 'math',
-    icon: 'Sigma',
-    path: '/tools/math-evaluator',
-    tags: ['math', 'eval', 'expression', 'scientific', 'math evaluator online', 'expression calculator', 'scientific calculator online', 'complex math solver'],
   },
   {
     id: 'text-unicode',
@@ -873,15 +828,6 @@ export const tools: Tool[] = [
     tags: ['xml', 'format', 'beautify', 'pretty', 'xml formatter online', 'xml beautifier', 'xml pretty print', 'online xml tool'],
   },
   {
-    id: 'ulid-generator',
-    name: 'ULID Generator',
-    description: 'Generate sortable unique identifiers',
-    category: 'generator',
-    icon: 'ArrowDown01',
-    path: '/tools/ulid-generator',
-    tags: ['ulid', 'id', 'unique', 'sortable', 'ulid generator', 'sortable id generator', 'unique id generator', 'online ulid tool'],
-  },
-  {
     id: 'integer-base-converter',
     name: 'Integer Base Converter',
     description: 'Convert numbers between decimal, hexadecimal, binary, and octal — instantly with a step-by-step breakdown',
@@ -970,15 +916,6 @@ export const tools: Tool[] = [
     icon: 'Link',
     path: '/tools/url-parser',
     tags: ['url', 'parse', 'query', 'params', 'url parser online', 'url breakdown', 'url query parser', 'online url tool'],
-  },
-  {
-    id: 'markdown-html',
-    name: 'Markdown ↔ HTML',
-    description: 'Convert and preview Markdown and HTML',
-    category: 'text',
-    icon: 'FileText',
-    path: '/tools/markdown-html',
-    tags: ['markdown', 'html', 'convert', 'preview', 'markdown to html', 'html to markdown', 'markdown converter', 'online markdown tool'],
   },
   {
     id: 'basic-auth',
@@ -1347,15 +1284,6 @@ export const tools: Tool[] = [
     tags: ['gpa', 'grades', 'school', 'gpa calculator', 'calculate gpa', 'weighted gpa', 'college gpa', 'online gpa calculator'],
   },
   {
-    id: 'ideal-weight-calculator',
-    name: 'Ideal Weight Calculator',
-    description: 'Estimate your healthy weight range based on WHO standards',
-    category: 'math',
-    icon: 'Target',
-    path: '/tools/ideal-weight-calculator',
-    tags: ['weight', 'health', 'ideal weight', 'ideal weight calculator', 'healthy weight range', 'body weight', 'online ideal weight calculator'],
-  },
-  {
     id: 'salary-calculator',
     name: 'Salary Calculator',
     description: 'Calculate and convert your salary across different pay periods',
@@ -1419,15 +1347,6 @@ export const tools: Tool[] = [
     icon: 'Dices',
     path: '/tools/random-number-generator',
     tags: ['random number', 'number generator', 'random picker', 'lottery numbers', 'dice roller', 'random generator', 'online random number', 'number picker'],
-  },
-  {
-    id: 'formal-email-generator',
-    name: 'Formal Email Generator',
-    description: 'Craft professional emails in seconds with ready-made templates',
-    category: 'generator',
-    icon: 'Mail',
-    path: '/tools/formal-email-generator',
-    tags: ['email generator', 'formal email', 'professional email', 'email template', 'business email', 'cover letter generator', 'online email tool'],
   },
   {
     id: 'invoice-generator',
@@ -1664,15 +1583,6 @@ export const tools: Tool[] = [
     tags: ['color', 'distance', 'delta e', 'color comparison', 'design tool', 'color theory'],
   },
   {
-    id: 'color-extractor',
-    name: 'Color Extractor',
-    description: 'Extract colors from images using an eyedropper tool with canvas pixel sampling',
-    category: 'color',
-    icon: 'Pipette',
-    path: '/tools/color-extractor',
-    tags: ['color', 'extract', 'palette', 'eyedropper', 'image colors', 'design tool'],
-  },
-  {
     id: 'color-harmony',
     name: 'Color Harmony',
     description: 'Generate color harmonies: complementary, analogous, triadic, split-complementary, tetradic, and monochromatic',
@@ -1707,15 +1617,6 @@ export const tools: Tool[] = [
     icon: 'Thermometer',
     path: '/tools/color-temperature',
     tags: ['color', 'temperature', 'kelvin', 'white balance', 'design tool', 'color theory'],
-  },
-  {
-    id: 'colorblind-simulator',
-    name: 'Colorblind Simulator',
-    description: 'Simulate how images appear to people with different types of color blindness',
-    category: 'color',
-    icon: 'Eye',
-    path: '/tools/colorblind-simulator',
-    tags: ['color', 'accessibility', 'colorblind', 'vision', 'a11y', 'design tool'],
   },
 
   // Audio Tools
@@ -2069,7 +1970,7 @@ const SUBGROUP_RULES: Record<string, { name: string; keywords: string[] }[]> = {
   text: [
     { name: "Case & Format", keywords: ["case-converter", "text-sorter", "line-numbers", "list-converter"] },
     { name: "Analyze", keywords: ["word-counter", "text-statistics", "readability-analyzer", "text-diff"] },
-    { name: "Clean & Convert", keywords: ["text-cleaner", "slugify", "html-markdown", "markdown-html", "md-table-generator"] },
+    { name: "Clean & Convert", keywords: ["text-cleaner", "slugify", "html-markdown"] },
     { name: "Transform", keywords: ["text-repeater", "text-reverser", "numeronym", "nato-alphabet"] },
     { name: "Parse", keywords: ["phone-parser"] },
   ],
@@ -2079,10 +1980,10 @@ const SUBGROUP_RULES: Record<string, { name: string; keywords: string[] }[]> = {
     { name: "Effects", keywords: ["video-rotator", "mute-video", "video-speed-changer", "aspect-ratio-converter"] },
   ],
   math: [
-    { name: "Calculators", keywords: ["calculator", "math-evaluator", "fraction-calculator", "percentage-calculator"] },
-    { name: "Health", keywords: ["bmi-calculator", "ideal-weight-calculator", "calorie-calculator"] },
+    { name: "Calculators", keywords: ["calculator", "fraction-calculator", "percentage-calculator"] },
+    { name: "Health", keywords: ["bmi-calculator", "calorie-calculator"] },
     { name: "Finance", keywords: ["salary-calculator", "tip-calculator", "zakat-calculator", "gpa-calculator"] },
-    { name: "Date & Time", keywords: ["age-calculator", "date-calculator", "datetime-hub", "eta-calculator"] },
+    { name: "Date & Time", keywords: ["age-calculator", "date-calculator", "eta-calculator"] },
     { name: "Tools", keywords: ["stopwatch"] },
   ],
   converter: [
@@ -2102,9 +2003,9 @@ const SUBGROUP_RULES: Record<string, { name: string; keywords: string[] }[]> = {
     { name: "Other", keywords: ["safelink-decoder"] },
   ],
   generator: [
-    { name: "QR & Barcode", keywords: ["qr-generator", "wifi-qr", "barcode-generator", "barcode-studio"] },
-    { name: "IDs & Tokens", keywords: ["uuid-generator", "ulid-generator", "token-generator", "random-number-generator"] },
-    { name: "Text", keywords: ["lorem-ipsum", "ascii-text-drawer", "formal-email-generator", "emoji-picker"] },
+    { name: "QR & Barcode", keywords: ["qr-generator", "wifi-qr", "barcode-generator"] },
+    { name: "IDs & Tokens", keywords: ["uuid-generator", "token-generator", "random-number-generator"] },
+    { name: "Text", keywords: ["lorem-ipsum", "ascii-text-drawer", "emoji-picker"] },
     { name: "Documents", keywords: ["invoice-generator"] },
   ],
 };

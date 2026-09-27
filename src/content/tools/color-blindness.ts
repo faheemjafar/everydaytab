@@ -57,7 +57,7 @@ const content: ToolContent = {
       answer: "No. The image is displayed and filtered in your browser only.",
     },
   ],
-  related: ["contrast-checker", "colorblind-simulator", "color-palette", "color-harmony", "color-distance", "color-converter"],
+  related: ["contrast-checker", "color-palette", "color-harmony", "color-distance", "color-converter"],
 };
 
 export default content;

@@ -59,7 +59,7 @@ const content: ToolContent = {
       answer: "No. The image is loaded and sampled entirely in your browser.",
     },
   ],
-  related: ["color-palette", "color-name-finder", "color-converter", "contrast-checker", "color-harmony", "color-mixer"],
+  related: ["color-name-finder", "color-converter", "contrast-checker", "color-harmony", "color-mixer"],
 };
 
 export default content;

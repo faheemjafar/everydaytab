@@ -55,7 +55,7 @@ const content: ToolContent = {
       answer: "The mixer works with opaque colours, but mixing A with B at X% is exactly what you would see with A at X% opacity over B.",
     },
   ],
-  related: ["gradient-studio", "color-converter", "color-harmony", "modern-color", "color-distance", "contrast-checker"],
+  related: ["gradient-studio", "color-converter", "color-harmony", "color-distance", "contrast-checker"],
 };
 
 export default content;

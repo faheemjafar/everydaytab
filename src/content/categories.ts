@@ -91,7 +91,7 @@ export const categoryContent: Record<string, CategoryContent> = {
     intro: [
       "Colour tools for designers and front-end developers: convert between HEX, RGB, HSL, LAB, LCH and OKLCH; find the closest named colour; build harmonies; mix two colours; measure perceptual distance (Delta E); extract palettes from images; check WCAG contrast; and preview how a palette looks to people with colour vision deficiency.",
     ],
-    featured: ["color-converter", "color-name-finder", "contrast-checker", "color-palette", "color-harmony", "color-mixer", "color-distance", "colorblind-simulator"],
+    featured: ["color-converter", "color-name-finder", "contrast-checker", "color-palette", "color-harmony", "color-mixer", "color-distance", "color-blindness"],
     faqs: [
       { question: "What is OKLCH and why do these tools support it?", answer: "OKLCH is a perceptually uniform colour space now supported in CSS. Equal steps in OKLCH look like equal steps to the eye, which makes it far better than HSL for generating consistent palettes and tints." },
     ],

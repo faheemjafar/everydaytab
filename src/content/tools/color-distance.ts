@@ -61,7 +61,7 @@ const content: ToolContent = {
       answer: "Convert them to hex first with the Color Converter, then paste both values here.",
     },
   ],
-  related: ["color-converter", "color-name-finder", "contrast-checker", "color-mixer", "color-palette", "colorblind-simulator"],
+  related: ["color-converter", "color-name-finder", "contrast-checker", "color-mixer", "color-palette", "color-blindness"],
 };
 
 export default content;

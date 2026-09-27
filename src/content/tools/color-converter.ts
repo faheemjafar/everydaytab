@@ -56,7 +56,7 @@ const content: ToolContent = {
       answer: "The converter works with opaque colours. Add an alpha channel in your CSS with rgb(r g b / a%) or an 8-digit HEX after converting.",
     },
   ],
-  related: ["modern-color", "color-name-finder", "contrast-checker", "color-mixer", "color-palette", "gradient-studio"],
+  related: ["color-name-finder", "contrast-checker", "color-mixer", "color-palette", "gradient-studio"],
 };
 
 export default content;

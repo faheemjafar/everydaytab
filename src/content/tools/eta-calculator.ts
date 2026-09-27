@@ -58,7 +58,7 @@ const content: ToolContent = {
       answer: "Yes — enter the values in a consistent unit (for example 4,000,000 MB) and the arithmetic scales without issue.",
     },
   ],
-  related: ["time-duration-converter", "stopwatch", "date-calculator", "percentage-calculator", "unit-converter", "datetime-hub"],
+  related: ["time-duration-converter", "stopwatch", "date-calculator", "percentage-calculator", "unit-converter"],
 };
 
 export default content;

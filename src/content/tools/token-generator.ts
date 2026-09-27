@@ -63,7 +63,7 @@ const content: ToolContent = {
         "For a 32-character alphanumeric token the chance is about 1 in 10^57 — effectively zero. Longer tokens make collisions even less likely.",
     },
   ],
-  related: ["password-generator", "uuid-generator", "ulid-generator", "otp-generator", "hmac-generator", "hash-generator"],
+  related: ["password-generator", "uuid-generator", "otp-generator", "hmac-generator", "hash-generator"],
 };
 
 export default content;

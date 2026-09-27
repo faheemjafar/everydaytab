@@ -43,7 +43,6 @@ const CATEGORY_EXTRA_KEYWORDS: Record<string, string[]> = {
 // its canonical at the primary (value) and is left out of the sitemap so Google
 // consolidates the two URLs instead of choosing between them.
 export const CANONICAL_TOOL: Record<string, string> = {
-  "md-table-generator": "markdown-table-generator",
 };
 
 export function getCanonicalToolId(toolId: string): string {

@@ -58,7 +58,7 @@ import cameraRecorder from "./camera-recorder";
 import chapterSplitter from "./chapter-splitter";
 import colorBlindness from "./color-blindness";
 import colorConverter from "./color-converter";
-import colorExtractor from "./color-extractor";
+import colorPalette from "./color-palette";
 import colorMixer from "./color-mixer";
 import colorTemperature from "./color-temperature";
 import compressor from "./compressor";
@@ -138,7 +138,7 @@ const registry: Record<string, ToolContent> = {
   "chapter-splitter": chapterSplitter,
   "color-blindness": colorBlindness,
   "color-converter": colorConverter,
-  "color-extractor": colorExtractor,
+  "color-palette": colorPalette,
   "color-mixer": colorMixer,
   "color-temperature": colorTemperature,
   compressor: compressor,

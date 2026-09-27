@@ -65,7 +65,7 @@ const content: ToolContent = {
         "No. Encoding and rendering happen entirely in your browser with the JsBarcode library. Nothing is sent to a server, so it is safe for internal part numbers and unreleased product codes.",
     },
   ],
-  related: ["barcode-studio", "qr-generator", "wifi-qr", "invoice-generator", "uuid-generator"],
+  related: ["qr-generator", "wifi-qr", "invoice-generator", "uuid-generator"],
 };
 
 export default content;

@@ -59,7 +59,7 @@ const content: ToolContent = {
         "JavaScript: crypto.randomUUID(). Python: uuid.uuid4(). PostgreSQL: gen_random_uuid(). Java: UUID.randomUUID(). Go: github.com/google/uuid. All produce v4 UUIDs equivalent to the ones generated here.",
     },
   ],
-  related: ["ulid-generator", "token-generator", "password-generator", "random-number-generator", "hash-generator", "json-schema"],
+  related: ["token-generator", "password-generator", "random-number-generator", "hash-generator", "json-schema"],
 };
 
 export default content;
