@@ -54,6 +54,25 @@ const ASSETS: [keyof S, string, string?][] = [
   ["other", "Other savings", "Pension withdrawable now, rental income saved…"],
 ];
 
+/** Shows 2,500,000 while idle and the raw number while editing. */
+function AmountInput({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const num = parseFloat(value.replace(/,/g, ""));
+  const shown = editing || !value || !Number.isFinite(num) ? value : num.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return (
+    <Input
+      id={id}
+      value={shown}
+      onFocus={() => setEditing(true)}
+      onBlur={() => setEditing(false)}
+      onChange={(e) => onChange(e.target.value.replace(/[^\d.]/g, ""))}
+      inputMode="decimal"
+      placeholder="0"
+      className="text-right font-mono tabular-nums"
+    />
+  );
+}
+
 export default function ZakatCalculator() {
   const mounted = useMounted();
   const [s, setS] = useLocalStore(store);
@@ -109,7 +128,7 @@ export default function ZakatCalculator() {
 
   const money$ = (k: keyof S, label: string, hint?: string) => (
     <Field key={k} label={label} hint={hint} htmlFor={`z-${k}`}>
-      <Input id={`z-${k}`} value={s[k]} onChange={set(k)} inputMode="decimal" placeholder="0" className="text-right font-mono" />
+      <AmountInput id={`z-${k}`} value={s[k]} onChange={(v) => setS((x) => ({ ...x, [k]: v }))} />
     </Field>
   );
 
@@ -126,10 +145,14 @@ export default function ZakatCalculator() {
       </Field>
       {live ? (
         <div className="space-y-2">
-          <div className="grid grid-cols-2 gap-2">
-            <Stat label="Gold / gram (24k)" value={money(live.gold)} />
-            <Stat label="Silver / gram" value={money(live.silver)} />
-          </div>
+          <dl className="rounded-md border border-border divide-y divide-border">
+            {[["Gold (24k)", live.gold], ["Silver", live.silver]].map(([k, v]) => (
+              <div key={k as string} className="flex items-baseline justify-between gap-2 px-3 py-2">
+                <dt className="text-xs text-muted-foreground">{k} <span className="text-[10px]">/ gram</span></dt>
+                <dd className="font-mono text-sm font-medium tabular-nums">{money(v as number)}</dd>
+              </div>
+            ))}
+          </dl>
           <div className="flex items-center justify-between text-[11px] text-muted-foreground">
             <span>Updated {mounted && rates ? new Date(rates.at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : ""}</span>
             <Button variant="ghost" size="sm" onClick={fetchRates} disabled={loading}><RefreshCw className={loading ? "animate-spin" : ""} /> Refresh</Button>
@@ -167,18 +190,18 @@ export default function ZakatCalculator() {
         <StatGrid>
           <Stat label="Total assets" value={money(assets)} />
           <Stat label="Deductions" value={money(liabilities)} />
-          <Stat label="Net zakatable" value={money(net)} />
+          <Stat label="Net zakatable" value={money(net)} hint={liabilities > assets ? "Deductions exceed assets" : undefined} />
           <Stat label="Nisab" value={priced ? money(nisab) : "—"} hint={s.nisab} />
         </StatGrid>
         <ToolPanel title="Assets held for a lunar year" bodyClassName="p-3 grid gap-3 sm:grid-cols-2">
           {ASSETS.map(([k, l, h]) => money$(k, l, h))}
           <Field label="Gold owned (grams)" hint={goldValue ? `≈ ${money(goldValue)}` : "Jewellery, coins, bars"} htmlFor="z-gg">
             <div className="flex gap-1.5">
-              <Input id="z-gg" value={s.goldG} onChange={set("goldG")} inputMode="decimal" placeholder="0" className="text-right font-mono" />
+              <AmountInput id="z-gg" value={s.goldG} onChange={(v) => setS((x) => ({ ...x, goldG: v }))} />
               <select value={s.karat} onChange={set("karat")} aria-label="Karat" className="h-(--control-h) rounded-md border border-input bg-card px-2 text-sm dark:bg-input/30">{Object.keys(KARAT).map((k) => <option key={k} value={k}>{k}k</option>)}</select>
             </div>
           </Field>
-          <Field label="Silver owned (grams)" hint={silverValue ? `≈ ${money(silverValue)}` : undefined} htmlFor="z-sg"><Input id="z-sg" value={s.silverG} onChange={set("silverG")} inputMode="decimal" placeholder="0" className="text-right font-mono" /></Field>
+          <Field label="Silver owned (grams)" hint={silverValue ? `≈ ${money(silverValue)}` : undefined} htmlFor="z-sg"><AmountInput id="z-sg" value={s.silverG} onChange={(v) => setS((x) => ({ ...x, silverG: v }))} /></Field>
         </ToolPanel>
         <ToolPanel title="Deductions" bodyClassName="p-3 grid gap-3 sm:grid-cols-2">
           {money$("debts", "Debts due now", "Loan instalments and money owed that are currently payable")}
