@@ -1,23 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
-import { 
-  FileText, 
-  Copy, 
-  Check, 
-  RefreshCw,
-  Type,
-  AlignLeft,
-  Settings2
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { CopyButton, DownloadButton, Field, OptionsLayout, Segmented, SliderField, StatusBadge, ToolPanel, Toggle } from "@/components/tool";
 
 const LOREM_WORDS = [
   "lorem", "ipsum", "dolor", "sit", "amet", "consectetur", "adipiscing", "elit",
@@ -29,194 +16,81 @@ const LOREM_WORDS = [
   "pariatur", "excepteur", "sint", "occaecat", "cupidatat", "non", "proident",
   "sunt", "in", "culpa", "qui", "officia", "deserunt", "mollit", "anim", "id", "est", "laborum"
 ];
+const CLASSIC = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
+
+type Unit = "paragraphs" | "sentences" | "words" | "list";
+type Out = "text" | "html" | "markdown";
+
+const pick = () => LOREM_WORDS[Math.floor(Math.random() * LOREM_WORDS.length)];
+const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+function sentence() {
+  const n = 6 + Math.floor(Math.random() * 10);
+  const w = Array.from({ length: n }, pick);
+  // Occasional comma for natural rhythm.
+  if (n > 8) w[3 + Math.floor(Math.random() * (n - 6))] += ",";
+  return cap(w.join(" ")) + ".";
+}
+const paragraph = () => Array.from({ length: 4 + Math.floor(Math.random() * 4) }, sentence).join(" ");
+
+function generate(unit: Unit, n: number, classic: boolean): string[] {
+  let items: string[];
+  if (unit === "words") items = [cap(Array.from({ length: n }, pick).join(" ")) + "."];
+  else if (unit === "sentences") items = [Array.from({ length: n }, sentence).join(" ")];
+  else if (unit === "list") items = Array.from({ length: n }, () => cap(Array.from({ length: 3 + Math.floor(Math.random() * 5) }, pick).join(" ")));
+  else items = Array.from({ length: n }, paragraph);
+  if (classic && items.length) {
+    if (unit === "words") items[0] = cap(["lorem", "ipsum", "dolor", "sit", "amet", ...items[0].toLowerCase().replace(/\.$/, "").split(" ").slice(5)].slice(0, Math.max(n, 1)).join(" ")) + ".";
+    else if (unit === "list") items[0] = "Lorem ipsum dolor sit amet";
+    else items[0] = CLASSIC + " " + items[0].split(". ").slice(1).join(". ");
+  }
+  return items.map((s) => s.trim());
+}
 
 export default function LoremIpsumGenerator() {
-  const [type, setType] = useState<"paragraphs" | "sentences" | "words">("paragraphs");
+  const [unit, setUnit] = useState<Unit>("paragraphs");
   const [count, setCount] = useState(3);
-  const [startWithLorem, setStartWithLorem] = useState(true);
-  const [generatedText, setGeneratedText] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [classic, setClassic] = useState(true);
+  const [out, setOut] = useState<Out>("text");
+  const [items, setItems] = useState<string[]>([]);
 
-  const generateText = () => {
-    let result = "";
-    
-    if (type === "words") {
-      result = generateWords(count);
-    } else if (type === "sentences") {
-      result = Array.from({ length: count }, () => generateSentence()).join(" ");
-    } else {
-      result = Array.from({ length: count }, () => generateParagraph()).join("\n\n");
-    }
-
-    if (startWithLorem) {
-      const words = result.split(" ");
-      words[0] = "Lorem";
-      words[1] = "ipsum";
-      words[2] = "dolor";
-      words[3] = "sit";
-      words[4] = "amet,";
-      result = words.join(" ");
-    }
-
-    setGeneratedText(result);
-  };
-
-  const generateWords = (n: number) => {
-    return Array.from({ length: n }, () => LOREM_WORDS[Math.floor(Math.random() * LOREM_WORDS.length)]).join(" ");
-  };
-
-  const generateSentence = () => {
-    const wordCount = Math.floor(Math.random() * 10) + 5;
-    let sentence = generateWords(wordCount);
-    sentence = sentence.charAt(0).toUpperCase() + sentence.slice(1) + ".";
-    return sentence;
-  };
-
-  const generateParagraph = () => {
-    const sentenceCount = Math.floor(Math.random() * 4) + 3;
-    return Array.from({ length: sentenceCount }, () => generateSentence()).join(" ");
-  };
-
+  const regen = (u = unit, n = count, c = classic) => setItems(generate(u, n, c));
   useEffect(() => {
-    generateText();
-  }, [type, count, startWithLorem]);
+    const t = setTimeout(() => regen(), 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(generatedText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const text =
+    unit === "list"
+      ? out === "html" ? `<ul>\n${items.map((i) => `  <li>${i}</li>`).join("\n")}\n</ul>` : items.map((i) => (out === "markdown" ? `- ${i}` : i)).join("\n")
+      : out === "html" ? items.map((p) => `<p>${p}</p>`).join("\n\n") : items.join("\n\n");
+  const words = items.join(" ").split(/\s+/).filter(Boolean).length;
+  const max = unit === "words" ? 1000 : unit === "sentences" ? 50 : 20;
+
+  const options = (
+    <ToolPanel title="Options" bodyClassName="p-3 space-y-4" footer={<Button size="lg" onClick={() => regen()} className="w-full"><RefreshCw /> Generate</Button>}>
+      <Field label="Generate">
+        <Segmented size="sm" value={unit} onChange={(u) => { const n = Math.min(count, u === "words" ? 1000 : u === "sentences" ? 50 : 20); setUnit(u); setCount(n); regen(u, n); }} options={[{ value: "paragraphs", label: "Paragraphs" }, { value: "sentences", label: "Sentences" }, { value: "words", label: "Words" }, { value: "list", label: "List items" }]} className="flex-wrap" />
+      </Field>
+      <SliderField label="Amount" value={count} onChange={(n) => { setCount(n); regen(unit, n); }} min={1} max={max} />
+      <Toggle label="Start with “Lorem ipsum dolor sit amet…”" checked={classic} onChange={(c) => { setClassic(c); regen(unit, count, c); }} />
+      <Field label="Output"><Segmented size="sm" value={out} onChange={setOut} options={[{ value: "text", label: "Plain text" }, { value: "html", label: "HTML" }, { value: "markdown", label: "Markdown" }]} /></Field>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="lorem-ipsum">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Configuration Panel */}
-        <div className="lg:col-span-4 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <Settings2 className="w-4 h-4 text-primary" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Generator Settings</span>
-                </div>
-
-                <div className="space-y-4">
-                  <Label className="text-sm font-bold">Type of Content</Label>
-                  <div className="grid grid-cols-3 gap-2 p-1 bg-muted/50 rounded-xl border border-border/50">
-                    {(["paragraphs", "sentences", "words"] as const).map((t) => (
-                      <Button
-                        key={t}
-                        variant={type === t ? "default" : "ghost"}
-                        size="sm"
-                        onClick={() => {
-                          setType(t);
-                          if (t === 'words' && count < 10) setCount(50);
-                          if (t === 'paragraphs' && count > 10) setCount(3);
-                        }}
-                        className={cn(
-                          "rounded-lg text-[10px] font-bold uppercase tracking-wider h-10",
-                          type === t && "shadow-md"
-                        )}
-                      >
-                        {t}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="flex justify-between items-center">
-                    <Label className="text-sm font-bold">Amount</Label>
-                    <span className="text-xs font-mono font-bold bg-primary/10 text-primary px-2 py-0.5 rounded-full">
-                      {count} {type}
-                    </span>
-                  </div>
-                  <Slider
-                    value={[count]}
-                    onValueChange={([v]) => setCount(v)}
-                    max={type === "words" ? 500 : type === "sentences" ? 50 : 20}
-                    min={1}
-                    step={1}
-                    className="py-4"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between p-4 rounded-2xl bg-muted/30 border border-border/40">
-                  <div className="space-y-0.5">
-                    <Label className="text-sm font-bold">Start with "Lorem ipsum..."</Label>
-                    <p className="text-[10px] text-muted-foreground">Always begin with the standard phrase</p>
-                  </div>
-                  <Switch
-                    checked={startWithLorem}
-                    onCheckedChange={setStartWithLorem}
-                  />
-                </div>
-              </div>
-
-              <Button 
-                onClick={generateText}
-                className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-              >
-                <RefreshCw className="w-5 h-5 mr-2" />
-                Regenerate
-              </Button>
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Type className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">About Lorem Ipsum</h3>
+      <OptionsLayout options={options}>
+        <ToolPanel title="Placeholder text" actions={<><StatusBadge>{words} words</StatusBadge><CopyButton text={text} label="Copy" /><DownloadButton content={text} filename={out === "html" ? "lorem.html" : "lorem.txt"} iconOnly /></>}>
+          {out === "text" ? (
+            <div className="p-4 space-y-3 text-[14px] leading-relaxed max-h-[600px] overflow-y-auto custom-scrollbar">
+              {unit === "list" ? <ul className="list-disc pl-5 space-y-1">{items.map((i, k) => <li key={k}>{i}</li>)}</ul> : items.map((p, k) => <p key={k}>{p}</p>)}
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed italic">
-              "Lorem ipsum dolor sit amet..." is the standard placeholder text used in the design and printing industry since the 1500s.
-            </p>
-          </div>
-        </div>
-
-        {/* Output Panel */}
-        <div className="lg:col-span-8">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-[2.5rem] overflow-hidden h-full flex flex-col">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <AlignLeft className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Generated Output</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={copyToClipboard}
-                className={cn(
-                  "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                  copied && "text-green-500 hover:text-green-500"
-                )}
-              >
-                {copied ? (
-                  <>
-                    <Check className="w-4 h-4 mr-2" />
-                    Copied
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-4 h-4 mr-2" />
-                    Copy All
-                  </>
-                )}
-              </Button>
-            </div>
-            <CardContent className="p-8 flex-1 overflow-auto">
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                {generatedText.split('\n\n').map((para, i) => (
-                  <p key={i} className="text-lg leading-relaxed text-foreground/80 mb-6 last:mb-0">
-                    {para}
-                  </p>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+          ) : (
+            <pre className="p-4 font-mono text-[12.5px] whitespace-pre-wrap max-h-[600px] overflow-y-auto custom-scrollbar">{text}</pre>
+          )}
+        </ToolPanel>
+      </OptionsLayout>
     </ToolLayout>
   );
 }

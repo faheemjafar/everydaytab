@@ -1,151 +1,111 @@
 "use client";
 
+import { useDeferredValue, useMemo, useState } from "react";
+import byGroup from "unicode-emoji-json/data-by-group.json";
+import { X } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { 
-  Smile, 
-  Search, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  Info,
-  Globe,
-  Heart,
-  Car,
-  Pizza,
-  Gamepad2,
-  Lightbulb,
-  Briefcase
-} from "lucide-react";
+import { CopyButton, Segmented, ToolPanel } from "@/components/tool";
 import { cn } from "@/lib/utils";
-import emojiData from "unicode-emoji-json";
+
+type E = { emoji: string; name: string; slug: string; skin_tone_support: boolean; emoji_version: string };
+const GROUPS = (byGroup as unknown as { name: string; slug: string; emojis: E[] }[]).map((g) => ({ name: g.name, slug: g.slug, emojis: g.emojis }));
+const ALL = GROUPS.flatMap((g) => g.emojis.map((e) => ({ ...e, group: g.name })));
+const TONES = [
+  { id: "", label: "✋", name: "Default" },
+  { id: "\u{1F3FB}", label: "✋🏻", name: "Light" },
+  { id: "\u{1F3FC}", label: "✋🏼", name: "Medium-light" },
+  { id: "\u{1F3FD}", label: "✋🏽", name: "Medium" },
+  { id: "\u{1F3FE}", label: "✋🏾", name: "Medium-dark" },
+  { id: "\u{1F3FF}", label: "✋🏿", name: "Dark" },
+];
+
+/** Inserts the skin-tone modifier after the first code point (drops any VS16 there). */
+function withTone(e: E, tone: string) {
+  if (!tone || !e.skin_tone_support) return e.emoji;
+  const cps = Array.from(e.emoji);
+  const rest = cps.slice(1);
+  if (rest[0] === "\uFE0F") rest.shift();
+  return cps[0] + tone + rest.join("");
+}
+const codepoints = (s: string) => Array.from(s).map((c) => `U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`).join(" ");
+const entities = (s: string) => Array.from(s).map((c) => `&#x${c.codePointAt(0)!.toString(16).toUpperCase()};`).join("");
 
 export default function EmojiPicker() {
-  const [search, setSearch] = useState("");
-  const [copied, setCopied] = useState<string | null>(null);
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const [group, setGroup] = useState(GROUPS[0].slug);
+  const [tone, setTone] = useState("");
+  const [tray, setTray] = useState("");
+  const [sel, setSel] = useState<(E & { group: string }) | null>(null);
+  const dq = useDeferredValue(q.trim().toLowerCase());
 
-  // Simplified categorization since the library doesn't provide it directly
-  const categories = [
-    { name: "Recent", icon: Zap },
-    { name: "Smiley", icon: Smile },
-    { name: "Hearts", icon: Heart },
-    { name: "Food", icon: Pizza },
-    { name: "Activities", icon: Gamepad2 },
-    { name: "Objects", icon: Lightbulb },
-    { name: "Travel", icon: Car },
-    { name: "Flags", icon: Globe }
-  ];
+  const list = useMemo(() => {
+    if (!dq) return GROUPS.find((g) => g.slug === group)!.emojis.map((e) => ({ ...e, group: "" }));
+    const terms = dq.split(/\s+/);
+    return ALL.filter((e) => terms.every((t) => e.name.includes(t) || e.slug.includes(t) || e.group.toLowerCase().includes(t)));
+  }, [dq, group]);
 
-  const emojis = Object.entries(emojiData).map(([emoji, info]: [string, any]) => ({
-    emoji,
-    name: info.name,
-    slug: info.slug,
-    group: info.group
-  }));
-
-  const filteredEmojis = emojis.filter(e => 
-    e.name.toLowerCase().includes(search.toLowerCase()) || 
-    e.slug.toLowerCase().includes(search.toLowerCase())
-  ).slice(0, 200); // Limit for performance
-
-  const copy = (val: string) => {
-    navigator.clipboard.writeText(val);
-    setCopied(val);
-    setTimeout(() => setCopied(null), 2000);
+  const pick = (e: E & { group: string }) => {
+    setSel(e);
+    setTray((t) => t + withTone(e, tone));
   };
+  const selEmoji = sel ? withTone(sel, tone) : "";
 
   return (
     <ToolLayout toolId="emoji-picker">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Sidebar */}
-        <div className="lg:col-span-3 space-y-4">
-          <div className="p-1 bg-muted/50 rounded-2xl border border-border/40 flex flex-col gap-1">
-            {categories.map((cat) => (
-              <Button
-                key={cat.name}
-                variant={activeCategory === cat.name ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setActiveCategory(cat.name)}
-                className="justify-start rounded-xl font-bold h-10 px-4 text-xs"
-              >
-                <cat.icon className="w-4 h-4 mr-2" />
-                {cat.name}
-              </Button>
-            ))}
-          </div>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Pro Tip</h3>
+      <div className="space-y-3">
+        <ToolPanel bodyClassName="p-3 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${ALL.length.toLocaleString()} emoji — e.g. heart, cat, party`} className="flex-1 min-w-56 h-10" autoFocus />
+            <div className="flex rounded-md border border-border overflow-hidden" role="radiogroup" aria-label="Skin tone">
+              {TONES.map((t) => (
+                <button key={t.name} type="button" role="radio" aria-checked={tone === t.id} title={t.name} onClick={() => setTone(t.id)} className={cn("w-9 h-10 text-lg hover:bg-muted", tone === t.id && "bg-accent")}>{t.label}</button>
+              ))}
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed italic">
-              Click any emoji to copy it instantly. Use the search bar to find specific emotions or objects.
-            </p>
           </div>
-        </div>
+          {!dq && <Segmented size="sm" value={group} onChange={setGroup} options={GROUPS.map((g) => ({ value: g.slug, label: `${g.emojis[0].emoji} ${g.name.split(" & ")[0]}` }))} className="flex-wrap" />}
+        </ToolPanel>
 
-        {/* Main Picker */}
-        <div className="lg:col-span-9 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col">
-            <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="relative w-full md:w-96">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input 
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search emojis (e.g. smile, heart, fire)..."
-                  className="h-12 pl-12 pr-6 rounded-xl bg-background border-border/40 font-bold focus:ring-primary/20"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-3 py-1 bg-muted/50 rounded-full">
-                  {filteredEmojis.length} Emojis Found
-                </span>
-              </div>
+        <div className="grid gap-3 lg:grid-cols-[1fr_280px]">
+          <ToolPanel title={dq ? `${list.length} results` : GROUPS.find((g) => g.slug === group)!.name}>
+            <div className="p-2 grid grid-cols-[repeat(auto-fill,minmax(2.75rem,1fr))] max-h-[520px] overflow-y-auto custom-scrollbar">
+              {list.map((e) => (
+                <button key={e.emoji} type="button" onClick={() => pick(e as E & { group: string })} title={e.name} aria-label={e.name} className={cn("h-11 text-[26px] rounded-md hover:bg-muted transition-transform active:scale-90", sel?.emoji === e.emoji && "bg-accent")}>
+                  {withTone(e, tone)}
+                </button>
+              ))}
+              {!list.length && <p className="col-span-full py-10 text-center text-xs text-muted-foreground">No emoji match “{q}”.</p>}
             </div>
-            
-            <CardContent className="p-8">
-              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 xl:grid-cols-10 gap-3">
-                {filteredEmojis.map((e, i) => (
-                  <button 
-                    key={i}
-                    onClick={() => copy(e.emoji)}
-                    className={cn(
-                      "group aspect-square rounded-2xl flex items-center justify-center text-3xl transition-all relative",
-                      copied === e.emoji ? "bg-green-500 scale-90" : "bg-muted/20 hover:bg-primary/10 hover:scale-110 active:scale-95"
-                    )}
-                    title={e.name}
-                  >
-                    <span className={cn(copied === e.emoji && "invisible")}>{e.emoji}</span>
-                    {copied === e.emoji && (
-                      <Check className="absolute inset-0 m-auto w-6 h-6 text-white animate-in zoom-in-50" />
-                    )}
-                  </button>
-                ))}
-              </div>
+          </ToolPanel>
 
-              {filteredEmojis.length === 0 && (
-                <div className="py-20 text-center space-y-4">
-                  <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mx-auto">
-                    <Search className="w-10 h-10 text-muted-foreground/30" />
+          <div className="space-y-3">
+            <ToolPanel title="Selected" bodyClassName="p-3">
+              {sel ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <span className="text-5xl">{selEmoji}</span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium capitalize">{sel.name}</p>
+                      <p className="text-[11px] text-muted-foreground">Emoji {sel.emoji_version}</p>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <h3 className="font-bold text-lg">No Emojis Found</h3>
-                    <p className="text-sm text-muted-foreground">Try searching for a different keyword.</p>
-                  </div>
+                  {[["Emoji", selEmoji], ["Shortcode", `:${sel.slug}:`], ["Code points", codepoints(selEmoji)], ["HTML", entities(selEmoji)]].map(([k, v]) => (
+                    <div key={k} className="flex items-center gap-2 text-xs">
+                      <span className="w-20 text-muted-foreground">{k}</span>
+                      <code className="flex-1 font-mono truncate">{v}</code>
+                      <CopyButton text={v} iconOnly className="size-6" />
+                    </div>
+                  ))}
                 </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">Click an emoji to add it to the tray below and see its details.</p>
               )}
-            </CardContent>
-          </Card>
+            </ToolPanel>
+            <ToolPanel title="Tray" actions={<>{tray && <Button variant="ghost" size="icon-sm" onClick={() => setTray("")} aria-label="Clear tray"><X /></Button>}<CopyButton text={tray} label="Copy" /></>}>
+              <textarea value={tray} onChange={(e) => setTray(e.target.value)} placeholder="Picked emoji collect here…" className="w-full min-h-24 resize-y bg-transparent p-3 text-2xl outline-none" />
+            </ToolPanel>
+          </div>
         </div>
       </div>
     </ToolLayout>

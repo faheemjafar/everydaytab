@@ -1,216 +1,77 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
-import { 
-  ShieldCheck, 
-  Copy, 
-  Check, 
-  RefreshCw,
-  Zap,
-  Lock,
-  Settings2,
-  Fingerprint,
-  Info
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { CopyButton, DownloadButton, Field, OptionsLayout, PrivacyNote, Segmented, SliderField, StatusBadge, ToolPanel } from "@/components/tool";
+import { randomBytes, randomString } from "@/lib/random";
+
+type Kind = "hex" | "base64url" | "base64" | "alnum" | "base32" | "numeric";
+const KINDS: Record<Kind, { label: string; hint: string; unit: "bytes" | "chars"; bitsPer: number }> = {
+  hex: { label: "Hex", hint: "Lowercase 0–9a–f. Common for API keys and secrets.", unit: "bytes", bitsPer: 8 },
+  base64url: { label: "Base64url", hint: "URL- and filename-safe (A–Z a–z 0–9 - _), no padding.", unit: "bytes", bitsPer: 8 },
+  base64: { label: "Base64", hint: "Standard alphabet with + / and = padding.", unit: "bytes", bitsPer: 8 },
+  alnum: { label: "Alphanumeric", hint: "A–Z a–z 0–9 — easy to copy, no symbols.", unit: "chars", bitsPer: Math.log2(62) },
+  base32: { label: "Base32", hint: "A–Z 2–7 — case-insensitive, used by TOTP secrets.", unit: "chars", bitsPer: 5 },
+  numeric: { label: "Numeric", hint: "Digits only — PINs and verification codes.", unit: "chars", bitsPer: Math.log2(10) },
+};
+
+function make(kind: Kind, size: number, prefix: string) {
+  let t: string;
+  if (kind === "hex") t = Array.from(randomBytes(size), (b) => b.toString(16).padStart(2, "0")).join("");
+  else if (kind === "base64" || kind === "base64url") {
+    const b64 = btoa(String.fromCharCode(...randomBytes(size)));
+    t = kind === "base64" ? b64 : b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  } else t = randomString(kind === "alnum" ? "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" : kind === "base32" ? "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567" : "0123456789", size);
+  return prefix + t;
+}
 
 export default function TokenGenerator() {
-  const [length, setLength] = useState(32);
-  const [count, setCount] = useState(1);
-  const [type, setType] = useState<"alphanumeric" | "hex" | "base64" | "base32">("alphanumeric");
+  const [kind, setKind] = useState<Kind>("hex");
+  const [size, setSize] = useState(32);
+  const [count, setCount] = useState(5);
+  const [prefix, setPrefix] = useState("");
   const [tokens, setTokens] = useState<string[]>([]);
-  const [copied, setCopied] = useState<number | null>(null);
 
-  const generateTokens = () => {
-    const newTokens = [];
-    const charset = {
-      alphanumeric: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
-      hex: "0123456789abcdef",
-      base64: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
-      base32: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
-    };
-
-    const currentCharset = charset[type];
-
-    for (let i = 0; i < count; i++) {
-      let token = "";
-      const array = new Uint32Array(length);
-      window.crypto.getRandomValues(array);
-      
-      for (let j = 0; j < length; j++) {
-        token += currentCharset[array[j] % currentCharset.length];
-      }
-      newTokens.push(token);
-    }
-    setTokens(newTokens);
-  };
-
+  const generate = (k = kind, s = size) => setTokens(Array.from({ length: Math.max(1, Math.min(500, count)) }, () => make(k, s, prefix)));
   useEffect(() => {
-    generateTokens();
-  }, [length, count, type]);
+    const t = setTimeout(() => generate(), 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const copy = (val: string, index: number) => {
-    navigator.clipboard.writeText(val);
-    setCopied(index);
-    setTimeout(() => setCopied(null), 2000);
-  };
+  const bits = Math.round(size * KINDS[kind].bitsPer);
 
-  const copyAll = () => {
-    navigator.clipboard.writeText(tokens.join("\n"));
-    setCopied(-1);
-    setTimeout(() => setCopied(null), 2000);
-  };
+  const options = (
+    <ToolPanel title="Token" bodyClassName="p-3 space-y-4" footer={<div className="w-full space-y-2"><Button size="lg" onClick={() => generate()} className="w-full"><RefreshCw /> Generate</Button><PrivacyNote>crypto.getRandomValues, generated in your browser.</PrivacyNote></div>}>
+      <Field label="Encoding" hint={KINDS[kind].hint}>
+        <Segmented size="sm" value={kind} onChange={(k) => { setKind(k); generate(k); }} options={(Object.keys(KINDS) as Kind[]).map((k) => ({ value: k, label: KINDS[k].label }))} className="flex-wrap" />
+      </Field>
+      <SliderField label={`Length (${KINDS[kind].unit})`} value={size} onChange={setSize} min={4} max={128} format={(v) => `${v} ${KINDS[kind].unit}`} />
+      <p className="text-xs"><StatusBadge tone={bits >= 128 ? "success" : bits >= 64 ? "warning" : "error"}>{bits} bits of entropy</StatusBadge> <span className="text-muted-foreground">{bits >= 128 ? "strong enough for secrets" : bits >= 64 ? "fine for IDs, weak for secrets" : "only for short codes"}</span></p>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Prefix" htmlFor="tp"><Input id="tp" value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="sk_live_" className="font-mono" /></Field>
+        <Field label="How many" htmlFor="tc"><Input id="tc" type="number" min={1} max={500} value={count} onChange={(e) => setCount(Number(e.target.value) || 1)} /></Field>
+      </div>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="token-generator">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Configuration Panel */}
-        <div className="lg:col-span-4 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-6">
-                <div className="flex items-center gap-2 mb-2">
-                  <Settings2 className="w-4 h-4 text-primary" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Token Config</span>
-                </div>
-
-                <div className="space-y-4">
-                  <Label className="text-sm font-bold">Encoding Type</Label>
-                  <div className="grid grid-cols-2 gap-2 p-1 bg-muted/50 rounded-2xl border border-border/40">
-                    {(["alphanumeric", "hex", "base64", "base32"] as const).map((t) => (
-                      <Button
-                        key={t}
-                        variant={type === t ? "default" : "ghost"}
-                        size="sm"
-                        onClick={() => setType(t)}
-                        className={cn(
-                          "rounded-xl font-bold h-10 text-[10px] uppercase tracking-wider",
-                          type === t && "shadow-md"
-                        )}
-                      >
-                        {t}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="flex justify-between items-center px-1">
-                    <Label className="text-sm font-bold">Token Length</Label>
-                    <span className="text-xs font-mono font-bold text-primary">{length} chars</span>
-                  </div>
-                  <Slider 
-                    value={[length]} 
-                    onValueChange={([v]) => setLength(v)} 
-                    max={128} 
-                    min={4} 
-                    step={4}
-                    className="py-4"
-                  />
-                </div>
-
-                <div className="space-y-6">
-                  <div className="flex justify-between items-center px-1">
-                    <Label className="text-sm font-bold">Batch Size</Label>
-                    <span className="text-xs font-mono font-bold text-primary">{count} tokens</span>
-                  </div>
-                  <Slider 
-                    value={[count]} 
-                    onValueChange={([v]) => setCount(v)} 
-                    max={20} 
-                    min={1} 
-                    step={1}
-                    className="py-4"
-                  />
-                </div>
-              </div>
-
-              <Button 
-                onClick={generateTokens}
-                className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-              >
-                <RefreshCw className="w-5 h-5 mr-2" />
-                Regenerate
-              </Button>
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Security Standard</h3>
-            </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Tokens are generated using <strong>window.crypto.getRandomValues()</strong>, providing cryptographically strong random values suitable for security-sensitive applications.
-            </p>
-          </div>
-        </div>
-
-        {/* Results Panel */}
-        <div className="lg:col-span-8 space-y-6">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col h-full min-h-[500px]">
-            <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <Zap className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-primary">Secure Output</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={copyAll}
-                disabled={tokens.length === 0}
-                className={cn(
-                  "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                  copied === -1 && "text-green-500 hover:text-green-500"
-                )}
-              >
-                {copied === -1 ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-                {copied === -1 ? "All Copied" : "Copy All"}
-              </Button>
-            </div>
-            <CardContent className="p-8 flex-1 overflow-auto bg-primary/[0.01]">
-              <div className="space-y-3">
-                {tokens.map((token, i) => (
-                  <div 
-                    key={i}
-                    className="group flex items-center justify-between p-4 rounded-2xl bg-muted/30 border border-border/40 hover:bg-muted/50 hover:border-primary/20 transition-all animate-in fade-in slide-in-from-bottom-2"
-                    style={{ animationDelay: `${i * 50}ms` }}
-                  >
-                    <div className="flex items-center gap-4 min-w-0">
-                      <div className="w-8 h-8 rounded-xl bg-background flex items-center justify-center text-[10px] font-bold text-muted-foreground shadow-inner shrink-0">
-                        {i + 1}
-                      </div>
-                      <span className="font-mono text-sm font-bold break-all">{token}</span>
-                    </div>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      onClick={() => copy(token, i)}
-                      className="h-10 w-10 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      {copied === i ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="flex items-center gap-3 p-4 px-6 bg-muted/30 rounded-2xl border border-border/40">
-            <Info className="w-4 h-4 text-muted-foreground" />
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              Total Entropy: {Math.floor(length * Math.log2(type === 'alphanumeric' ? 62 : type === 'hex' ? 16 : type === 'base64' ? 64 : 32))} bits per token
-            </span>
-          </div>
-        </div>
-      </div>
+      <OptionsLayout options={options}>
+        <ToolPanel title={`Tokens · ${tokens.length}`} actions={<><CopyButton text={tokens.join("\n")} label="Copy all" /><DownloadButton content={tokens.join("\n")} filename="tokens.txt" iconOnly /></>}>
+          <ul className="divide-y divide-border max-h-[560px] overflow-y-auto custom-scrollbar">
+            {tokens.map((t, i) => (
+              <li key={i} className="group flex items-center gap-3 px-3.5 py-2">
+                <code className="flex-1 font-mono text-[13px] break-all">{t}</code>
+                <CopyButton text={t} iconOnly className="opacity-60 group-hover:opacity-100" />
+              </li>
+            ))}
+          </ul>
+        </ToolPanel>
+      </OptionsLayout>
     </ToolLayout>
   );
 }

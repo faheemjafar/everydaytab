@@ -1,169 +1,132 @@
 "use client";
 
-import { ToolLayout } from "@/components/tool-layout";
-
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { 
-  Type, 
-  Copy, 
-  Check, 
-  Trash2,
-  Zap,
-  Info,
-  ChevronDown,
-  Monitor,
-  Layout
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useEffect, useState } from "react";
 import figlet from "figlet";
+import { ToolLayout } from "@/components/tool-layout";
+import { Input } from "@/components/ui/input";
+import { CopyButton, DownloadButton, Field, OptionsLayout, Segmented, SliderField, StatusBadge, ToolPanel } from "@/components/tool";
+import { cn } from "@/lib/utils";
 
-// Import all standard fonts for figlet
-import standard from "figlet/importable-fonts/Standard.js";
-import slant from "figlet/importable-fonts/Slant.js";
-import shadow from "figlet/importable-fonts/Shadow.js";
-import small from "figlet/importable-fonts/Small.js";
-import script from "figlet/importable-fonts/Script.js";
-import bubble from "figlet/importable-fonts/Bubble.js";
-import block from "figlet/importable-fonts/Block.js";
-
-const fonts = {
-  Standard: standard,
-  Slant: slant,
-  Shadow: shadow,
-  Small: small,
-  Script: script,
-  Bubble: bubble,
-  Block: block
+// Fonts load on demand (each is a separate chunk) instead of shipping them all up front.
+const FONTS: Record<string, () => Promise<{ default: string }>> = {
+  "Standard": () => import("figlet/importable-fonts/Standard.js"),
+  "Slant": () => import("figlet/importable-fonts/Slant.js"),
+  "Small": () => import("figlet/importable-fonts/Small.js"),
+  "Big": () => import("figlet/importable-fonts/Big.js"),
+  "Banner3": () => import("figlet/importable-fonts/Banner3.js"),
+  "Doom": () => import("figlet/importable-fonts/Doom.js"),
+  "Ogre": () => import("figlet/importable-fonts/Ogre.js"),
+  "Shadow": () => import("figlet/importable-fonts/Shadow.js"),
+  "Small Slant": () => import("figlet/importable-fonts/Small Slant.js"),
+  "Colossal": () => import("figlet/importable-fonts/Colossal.js"),
+  "Graffiti": () => import("figlet/importable-fonts/Graffiti.js"),
+  "Epic": () => import("figlet/importable-fonts/Epic.js"),
+  "Isometric1": () => import("figlet/importable-fonts/Isometric1.js"),
+  "Larry 3D": () => import("figlet/importable-fonts/Larry 3D.js"),
+  "Star Wars": () => import("figlet/importable-fonts/Star Wars.js"),
+  "ANSI Shadow": () => import("figlet/importable-fonts/ANSI Shadow.js"),
+  "ANSI Regular": () => import("figlet/importable-fonts/ANSI Regular.js"),
+  "Bloody": () => import("figlet/importable-fonts/Bloody.js"),
+  "Calvin S": () => import("figlet/importable-fonts/Calvin S.js"),
+  "Rectangles": () => import("figlet/importable-fonts/Rectangles.js"),
+  "Script": () => import("figlet/importable-fonts/Script.js"),
+  "Block": () => import("figlet/importable-fonts/Block.js"),
+  "Bubble": () => import("figlet/importable-fonts/Bubble.js"),
+  "Mini": () => import("figlet/importable-fonts/Mini.js"),
+  "Digital": () => import("figlet/importable-fonts/Digital.js"),
+  "3D-ASCII": () => import("figlet/importable-fonts/3D-ASCII.js"),
+  "Speed": () => import("figlet/importable-fonts/Speed.js"),
+  "Georgia11": () => import("figlet/importable-fonts/Georgia11.js"),
+  "Univers": () => import("figlet/importable-fonts/Univers.js"),
+  "Roman": () => import("figlet/importable-fonts/Roman.js"),
 };
+type FontName = keyof typeof FONTS;
+type Wrap = "none" | "slash" | "hash" | "block" | "html";
 
-// Initialize figlet fonts
-Object.entries(fonts).forEach(([name, data]) => {
-  figlet.parseFont(name, data);
-});
+const loaded = new Set<string>();
+async function ensure(name: string) {
+  if (loaded.has(name)) return;
+  const mod = await FONTS[name]();
+  figlet.parseFont(name as figlet.Fonts, mod.default);
+  loaded.add(name);
+}
+const draw = (text: string, font: string, width: number) => figlet.textSync(text, { font: font as figlet.Fonts, width, whitespaceBreak: true }).replace(/\s+$/gm, "");
+
+function wrap(art: string, w: Wrap) {
+  const lines = art.split("\n");
+  if (w === "slash") return lines.map((l) => `// ${l}`).join("\n");
+  if (w === "hash") return lines.map((l) => `# ${l}`).join("\n");
+  if (w === "block") return `/*\n${lines.map((l) => ` * ${l}`).join("\n")}\n */`;
+  if (w === "html") return `<!--\n${art}\n-->`;
+  return art;
+}
 
 export default function ASCIITextDrawer() {
-  const [input, setInput] = useState("EverydayTab");
-  const [font, setFont] = useState<string>("Standard");
-  const [output, setOutput] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [text, setText] = useState("Hello");
+  const [font, setFont] = useState<FontName>("Standard");
+  const [width, setWidth] = useState(100);
+  const [comment, setComment] = useState<Wrap>("none");
+  const [art, setArt] = useState<{ key: string; value: string }>({ key: "", value: "" });
+  const [gallery, setGallery] = useState<Record<string, string>>({});
+  const [showGallery, setShowGallery] = useState(false);
 
-  const draw = () => {
-    if (!input) {
-      setOutput("");
-      return;
-    }
-    figlet.text(input, { font: font as any }, (err, data) => {
-      if (err) {
-        console.error(err);
-        return;
-      }
-      setOutput(data || "");
-    });
-  };
-
+  const key = `${text}|${font}|${width}`;
   useEffect(() => {
-    draw();
-  }, [input, font]);
+    let alive = true;
+    ensure(font).then(() => alive && setArt({ key, value: text ? draw(text, font, width) : "" }));
+    return () => { alive = false; };
+  }, [text, font, width, key]);
 
-  const copyToClipboard = () => {
-    if (!output) return;
-    navigator.clipboard.writeText(output);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  // Gallery: render the current text in every font (loads fonts lazily, once).
+  useEffect(() => {
+    if (!showGallery) return;
+    let alive = true;
+    const sample = (text || "Abc").slice(0, 12);
+    Promise.all(Object.keys(FONTS).map(async (f) => { await ensure(f); return [f, draw(sample, f, 200)] as const; })).then((r) => alive && setGallery(Object.fromEntries(r)));
+    return () => { alive = false; };
+  }, [showGallery, text]);
+
+  const out = art.key === key ? wrap(art.value, comment) : "";
+  const widest = out ? Math.max(...out.split("\n").map((l) => l.length)) : 0;
+
+  const options = (
+    <ToolPanel title="Options" bodyClassName="p-3 space-y-4">
+      <Field label="Text" htmlFor="at"><Input id="at" value={text} onChange={(e) => setText(e.target.value)} maxLength={80} autoFocus /></Field>
+      <Field label="Font" htmlFor="af">
+        <select id="af" value={font} onChange={(e) => setFont(e.target.value as FontName)} className="h-(--control-h) w-full rounded-md border border-input bg-card px-2 text-sm dark:bg-input/30">
+          {Object.keys(FONTS).map((f) => <option key={f} value={f}>{f}</option>)}
+        </select>
+      </Field>
+      <SliderField label="Max width" value={width} onChange={setWidth} min={40} max={200} step={10} format={(v) => `${v} columns`} />
+      <Field label="Wrap as comment">
+        <Segmented size="sm" value={comment} onChange={setComment} options={[{ value: "none", label: "None" }, { value: "slash", label: "//" }, { value: "hash", label: "#" }, { value: "block", label: "/* */" }, { value: "html", label: "<!-- -->" }]} className="flex-wrap" />
+      </Field>
+      <p className="text-[11px] text-muted-foreground">Handy for README headers, CLI splash screens and source-file banners.</p>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="ascii-text-drawer">
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Column: Input and Controls */}
-        <div className="lg:col-span-4 space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-6">
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Your Text</Label>
-                  <Input 
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    placeholder="Type something..."
-                    className="h-14 px-6 rounded-2xl bg-muted/30 border-border/40 font-bold text-lg focus:ring-primary/20"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">Art Style (Font)</Label>
-                  <div className="relative group">
-                    <select 
-                      value={font}
-                      onChange={(e) => setFont(e.target.value)}
-                      className="w-full h-14 pl-6 pr-12 rounded-2xl bg-muted/30 border border-border/40 font-bold text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer transition-all hover:bg-muted/50"
-                    >
-                      {Object.keys(fonts).map((f) => (
-                        <option key={f} value={f}>{f}</option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground pointer-events-none group-hover:text-primary transition-colors" />
-                  </div>
-                </div>
-              </div>
-
-              <Button 
-                onClick={() => setInput("")}
-                variant="ghost"
-                className="w-full h-12 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive/10 font-bold"
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Clear Text
-              </Button>
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Monitor className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Terminal Tip</h3>
+      <OptionsLayout options={options}>
+        <ToolPanel
+          title={font}
+          actions={<>{widest > 0 && <StatusBadge>{widest} × {out.split("\n").length}</StatusBadge>}<CopyButton text={out} label="Copy" /><DownloadButton content={out} filename="ascii-art.txt" iconOnly /></>}
+        >
+          <pre className="p-4 font-mono text-[12px] leading-[1.15] overflow-x-auto custom-scrollbar min-h-40 whitespace-pre">{out || " "}</pre>
+        </ToolPanel>
+        <ToolPanel title="All fonts" actions={<button type="button" onClick={() => setShowGallery((s) => !s)} className="h-7 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted">{showGallery ? "Hide" : "Preview every font"}</button>}>
+          {showGallery && (
+            <div className="grid gap-px bg-border lg:grid-cols-2">
+              {Object.keys(FONTS).map((f) => (
+                <button key={f} type="button" onClick={() => setFont(f as FontName)} className={cn("text-left bg-card p-3 hover:bg-muted/60 overflow-hidden", f === font && "bg-accent/40")}>
+                  <p className="text-[11px] text-muted-foreground mb-1">{f}</p>
+                  <pre className="font-mono text-[9px] leading-[1.1] overflow-hidden whitespace-pre">{gallery[f] ?? "…"}</pre>
+                </button>
+              ))}
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              ASCII art is perfect for adding a professional touch to your command-line tools, configuration file headers, or code comments.
-            </p>
-          </div>
-        </div>
-
-        {/* Right Column: Output */}
-        <div className="lg:col-span-8 h-full">
-          <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden flex flex-col h-full min-h-[500px]">
-            <div className="px-8 py-6 border-b border-border/40 bg-primary/5 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <Zap className="w-4 h-4 text-primary" />
-                <span className="text-xs font-bold uppercase tracking-widest text-primary">ASCII Art Preview</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={copyToClipboard}
-                disabled={!output}
-                className={cn(
-                  "rounded-xl font-bold px-4 hover:bg-primary/10 transition-all",
-                  copied && "text-green-500 hover:text-green-500"
-                )}
-              >
-                {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
-                {copied ? "Copied" : "Copy Result"}
-              </Button>
-            </div>
-            <CardContent className="p-8 flex-1 overflow-auto bg-primary/[0.01]">
-              <pre className="font-mono text-[11px] sm:text-xs md:text-sm leading-none whitespace-pre text-foreground/90 selection:bg-primary/20">
-                {output || <span className="text-muted-foreground italic">Your art will appear here...</span>}
-              </pre>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+          )}
+        </ToolPanel>
+      </OptionsLayout>
     </ToolLayout>
   );
 }

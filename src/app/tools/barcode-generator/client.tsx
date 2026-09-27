@@ -1,101 +1,189 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import JsBarcode from "jsbarcode";
+import { Download, RefreshCw } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
 import { Button } from "@/components/ui/button";
-import { Barcode as BarcodeIcon, Download, Settings, Palette } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { CodeArea, ColorField, Field, OptionsLayout, Segmented, SliderField, StatusBadge, ToolAlert, ToolPanel, Toggle } from "@/components/tool";
+
+type Fmt = "CODE128" | "CODE39" | "EAN13" | "EAN8" | "UPC" | "UPCE" | "ITF14" | "ITF" | "codabar" | "MSI" | "pharmacode";
+
+const FORMATS: Record<Fmt, { label: string; hint: string; example: string; test: RegExp }> = {
+  CODE128: { label: "Code 128", hint: "Any ASCII text — shipping labels, inventory, general use.", example: "EVERYDAYTAB-2026", test: /^[\x00-\x7F]+$/ },
+  CODE39: { label: "Code 39", hint: "A–Z, 0–9 and - . $ / + % space — automotive, defence, badges.", example: "CODE 39", test: /^[0-9A-Z\-. $/+%]+$/ },
+  EAN13: { label: "EAN-13", hint: "12 digits (check digit added) — retail products outside North America.", example: "590123412345", test: /^\d{12,13}$/ },
+  EAN8: { label: "EAN-8", hint: "7 digits (check digit added) — small retail packages.", example: "9638507", test: /^\d{7,8}$/ },
+  UPC: { label: "UPC-A", hint: "11 digits (check digit added) — North American retail.", example: "03600029145", test: /^\d{11,12}$/ },
+  UPCE: { label: "UPC-E", hint: "6–8 digits — compressed UPC for small packages.", example: "01234565", test: /^\d{6,8}$/ },
+  ITF14: { label: "ITF-14", hint: "13 digits (check digit added) — shipping cartons (GTIN-14).", example: "1540014128876", test: /^\d{13,14}$/ },
+  ITF: { label: "ITF (Interleaved 2 of 5)", hint: "Even number of digits — warehousing.", example: "123456", test: /^(\d\d)+$/ },
+  codabar: { label: "Codabar", hint: "Digits and - $ : / . + with A–D start/stop — libraries, blood banks.", example: "A12345B", test: /^[A-D]?[0-9\-$:/.+]+[A-D]?$/i },
+  MSI: { label: "MSI Plessey", hint: "Digits only — shelf labels.", example: "1234567", test: /^\d+$/ },
+  pharmacode: { label: "Pharmacode", hint: "Number 3–131070 — pharmaceutical packaging.", example: "1234", test: /^\d+$/ },
+};
+
+/** GS1 mod-10 check digit (EAN/UPC/ITF-14). */
+function gs1Check(d: string) {
+  const sum = d.split("").reverse().reduce((s, c, i) => s + Number(c) * (i % 2 === 0 ? 3 : 1), 0);
+  return String((10 - (sum % 10)) % 10);
+}
+const GS1_LEN: Partial<Record<Fmt, number>> = { EAN13: 13, EAN8: 8, UPC: 12, ITF14: 14 };
+
+function validate(fmt: Fmt, v: string): string | null {
+  if (!v) return "Empty value.";
+  const f = FORMATS[fmt];
+  const val = fmt === "CODE39" ? v.toUpperCase() : v;
+  if (!f.test.test(val)) return `Not valid for ${f.label}: ${f.hint}`;
+  const n = GS1_LEN[fmt];
+  if (n && v.length === n && gs1Check(v.slice(0, -1)) !== v.slice(-1)) return `Wrong check digit — should end in ${gs1Check(v.slice(0, -1))} (${v.slice(0, -1)}${gs1Check(v.slice(0, -1))}).`;
+  if (fmt === "pharmacode" && (Number(v) < 3 || Number(v) > 131070)) return "Pharmacode must be between 3 and 131070.";
+  return null;
+}
+
+interface Opts { format: Fmt; width: number; height: number; displayValue: boolean; fontSize: number; margin: number; lineColor: string; background: string }
+
+function render(svg: SVGSVGElement, value: string, o: Opts) {
+  JsBarcode(svg, o.format === "CODE39" ? value.toUpperCase() : value, { ...o, font: "monospace", textMargin: 4 });
+}
+
+async function svgToPng(svg: SVGSVGElement, scale = 3): Promise<Blob> {
+  const xml = new XMLSerializer().serializeToString(svg);
+  const img = new Image();
+  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`;
+  await img.decode();
+  const c = document.createElement("canvas");
+  c.width = img.width * scale;
+  c.height = img.height * scale;
+  const ctx = c.getContext("2d")!;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  return new Promise((r) => c.toBlob((b) => r(b!), "image/png"));
+}
+
+const save = (blob: Blob, name: string) => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+const safe = (s: string) => s.replace(/[^\w.-]+/g, "_").slice(0, 60) || "barcode";
 
 export default function BarcodeGenerator() {
-  const [content, setContent] = useState("");
-  const [barcodeOptions, setBarcodeOptions] = useState({ width: 2, height: 100, format: "CODE128" as string, displayValue: true, margin: 10, fontSize: 20, lineColor: "#000000", background: "#ffffff" });
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [mode, setMode] = useState<"single" | "batch">("single");
+  const [value, setValue] = useState(FORMATS.CODE128.example);
+  const [batch, setBatch] = useState("");
+  const [o, setO] = useState<Opts>({ format: "CODE128", width: 2, height: 90, displayValue: true, fontSize: 16, margin: 10, lineColor: "#000000", background: "#ffffff" });
+  const [zipping, setZipping] = useState(false);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const set = <K extends keyof Opts>(k: K, v: Opts[K]) => setO((x) => ({ ...x, [k]: v }));
+
+  const error = mode === "single" ? validate(o.format, value) : null;
+  const lines = useMemo(() => batch.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 200), [batch]);
 
   useEffect(() => {
-    if (content && canvasRef.current) {
-      try {
-        const JsBarcode = require("jsbarcode");
-        JsBarcode(canvasRef.current, content, { ...barcodeOptions, renderer: "canvas" });
-      } catch (e) { console.error("Barcode generation failed:", e); }
+    if (mode === "single" && svgRef.current && !error) {
+      try { render(svgRef.current, value, o); } catch { /* validated above */ }
     }
-  }, [content, barcodeOptions]);
+  }, [mode, value, o, error]);
 
-  const handleDownload = () => {
-    if (!content || !canvasRef.current) return;
-    const link = document.createElement("a");
-    link.download = `barcode-${Date.now()}.png`;
-    link.href = canvasRef.current.toDataURL("image/png");
-    link.click();
+  const downloadSvg = () => svgRef.current && save(new Blob([new XMLSerializer().serializeToString(svgRef.current)], { type: "image/svg+xml" }), `${safe(value)}.svg`);
+  const downloadPng = async () => svgRef.current && save(await svgToPng(svgRef.current), `${safe(value)}.png`);
+
+  const downloadZip = async () => {
+    setZipping(true);
+    try {
+      const { default: JSZip } = await import("jszip");
+      const zip = new JSZip();
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      for (const [i, l] of lines.entries()) {
+        if (validate(o.format, l)) continue;
+        render(svg, l, o);
+        zip.file(`${String(i + 1).padStart(3, "0")}-${safe(l)}.png`, await svgToPng(svg));
+      }
+      save(await zip.generateAsync({ type: "blob" }), "barcodes.zip");
+    } finally {
+      setZipping(false);
+    }
   };
 
-  const lineColors = [{ value: "#000000" }, { value: "#1e40af" }, { value: "#b91c1c" }, { value: "#15803d" }, { value: "#6b21a8" }, { value: "#334155" }];
-  const bgColors = [{ value: "#ffffff" }, { value: "#f8fafc" }, { value: "#f0f9ff" }, { value: "#fef2f2" }, { value: "#fff7ed" }, { value: "#f0fdf4" }];
+  const options = (
+    <ToolPanel title="Barcode" bodyClassName="p-3 space-y-4">
+      <Field label="Format" hint={FORMATS[o.format].hint} htmlFor="bf">
+        <select id="bf" value={o.format} onChange={(e) => { const f = e.target.value as Fmt; set("format", f); if (mode === "single") setValue(FORMATS[f].example); }} className="h-(--control-h) w-full rounded-md border border-input bg-card px-2 text-sm dark:bg-input/30">
+          {(Object.keys(FORMATS) as Fmt[]).map((f) => <option key={f} value={f}>{FORMATS[f].label}</option>)}
+        </select>
+      </Field>
+      <SliderField label="Bar width" value={o.width} onChange={(v) => set("width", v)} min={1} max={4} step={0.5} format={(v) => `${v}px`} />
+      <SliderField label="Height" value={o.height} onChange={(v) => set("height", v)} min={30} max={200} format={(v) => `${v}px`} />
+      <SliderField label="Quiet zone" value={o.margin} onChange={(v) => set("margin", v)} min={0} max={40} format={(v) => `${v}px`} />
+      <Toggle label="Show text" checked={o.displayValue} onChange={(v) => set("displayValue", v)} />
+      {o.displayValue && <SliderField label="Font size" value={o.fontSize} onChange={(v) => set("fontSize", v)} min={8} max={32} />}
+      <div className="grid grid-cols-2 gap-2">
+        <ColorField label="Bars" value={o.lineColor} onChange={(v) => set("lineColor", v)} />
+        <ColorField label="Background" value={o.background} onChange={(v) => set("background", v)} />
+      </div>
+      <p className="text-[11px] text-muted-foreground">Keep dark bars on a light background with a quiet zone — low contrast or inverted colours often won&apos;t scan.</p>
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="barcode-generator">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        <div className="lg:col-span-4 lg:order-last space-y-6">
-          <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-sm">
-            <Button onClick={handleDownload} disabled={!content} className="w-full h-12 shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground font-bold uppercase tracking-widest text-xs rounded-xl"><Download className="w-5 h-5 mr-2" /> Download Barcode</Button>
-          </div>
-          <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-sm">
-            <h3 className="text-sm font-bold text-foreground uppercase tracking-wide">Barcode Options</h3>
-            <div className="space-y-4">
-              <div className="flex items-end gap-3">
-                <div className="flex-1"><label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 block">Format</label>
-                  <select value={barcodeOptions.format} onChange={(e) => setBarcodeOptions({ ...barcodeOptions, format: e.target.value })} className="w-full px-3 py-2.5 border border-border rounded-xl focus:border-primary focus:outline-none text-sm font-bold bg-card">
-                    <option value="CODE128">CODE128</option><option value="EAN13">EAN-13</option><option value="UPC">UPC</option><option value="CODE39">CODE39</option><option value="ITF14">ITF-14</option><option value="MSI">MSI</option><option value="pharmacode">Pharmacode</option>
-                  </select>
+      <OptionsLayout options={options}>
+        <Segmented value={mode} onChange={setMode} options={[{ value: "single", label: "Single barcode" }, { value: "batch", label: "Batch (one per line)" }]} />
+        {mode === "single" ? (
+          <>
+            <ToolPanel bodyClassName="p-3 space-y-1.5">
+              <Input value={value} onChange={(e) => setValue(e.target.value)} className="h-11 text-lg font-mono" spellCheck={false} aria-invalid={error ? true : undefined} />
+              {GS1_LEN[o.format] && /^\d+$/.test(value) && value.length === GS1_LEN[o.format]! - 1 && <p className="text-[11px] text-muted-foreground">Check digit {gs1Check(value)} will be added automatically.</p>}
+            </ToolPanel>
+            {error ? (
+              <ToolAlert tone="error">{error}</ToolAlert>
+            ) : (
+              <ToolPanel
+                title="Preview"
+                actions={<StatusBadge tone="success">Valid {FORMATS[o.format].label}</StatusBadge>}
+                footer={
+                  <>
+                    <span className="flex-1" />
+                    <Button variant="outline" onClick={downloadSvg}><Download /> SVG</Button>
+                    <Button onClick={downloadPng}><Download /> PNG</Button>
+                  </>
+                }
+              >
+                <div className="p-6 flex justify-center overflow-x-auto" style={{ background: o.background }}>
+                  <svg ref={svgRef} />
                 </div>
-                <div className="h-[42px] flex items-center"><label className="flex items-center cursor-pointer gap-2 px-3 py-2 border border-border rounded-xl hover:bg-muted transition-colors"><input type="checkbox" checked={barcodeOptions.displayValue} onChange={(e) => setBarcodeOptions({ ...barcodeOptions, displayValue: e.target.checked })} className="w-4 h-4 text-primary rounded focus:ring-primary border-border" /><span className="text-xs font-bold text-foreground">Text</span></label></div>
-              </div>
-              <div className="space-y-4 pt-4 border-t border-border">
-                <div className="flex items-center gap-2 mb-2"><Settings className="w-4 h-4 text-muted-foreground" /><span className="text-sm font-bold text-foreground">Dimensions</span></div>
-                <div><label className="block text-xs font-bold text-foreground mb-1">Width: {barcodeOptions.width}</label><input type="range" min="1" max="4" step="0.1" value={barcodeOptions.width} onChange={(e) => setBarcodeOptions({ ...barcodeOptions, width: Number(e.target.value) })} className="w-full h-2 bg-primary/20 rounded-lg appearance-none cursor-pointer accent-primary" /></div>
-                <div><label className="block text-xs font-bold text-foreground mb-1">Height: {barcodeOptions.height}px</label><input type="range" min="50" max="200" step="5" value={barcodeOptions.height} onChange={(e) => setBarcodeOptions({ ...barcodeOptions, height: Number(e.target.value) })} className="w-full h-2 bg-primary/20 rounded-lg appearance-none cursor-pointer accent-primary" /></div>
-              </div>
-              <div className="space-y-4 pt-4 border-t border-border">
-                <div className="flex items-center gap-2 mb-2"><Palette className="w-4 h-4 text-muted-foreground" /><span className="text-sm font-bold text-foreground">Colors</span></div>
-                <div><label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1 block">Line Color</label><div className="flex items-center gap-2"><div className="w-6 h-6 rounded border border-border shadow-sm" style={{ backgroundColor: barcodeOptions.lineColor }}></div><div className="flex-1 flex gap-1 flex-wrap">{lineColors.map((c) => (<button key={c.value} onClick={() => setBarcodeOptions({ ...barcodeOptions, lineColor: c.value })} className="w-6 h-6 rounded-full border border-border" style={{ backgroundColor: c.value }} />))}</div></div></div>
-                <div><label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1 block">Background</label><div className="flex items-center gap-2"><div className="w-6 h-6 rounded border border-border shadow-sm" style={{ backgroundColor: barcodeOptions.background }}></div><div className="flex-1 flex gap-1 flex-wrap">{bgColors.map((c) => (<button key={c.value} onClick={() => setBarcodeOptions({ ...barcodeOptions, background: c.value })} className="w-6 h-6 rounded-full border border-border" style={{ backgroundColor: c.value }} />))}</div></div></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="lg:col-span-8 space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-            <div className="space-y-4">
-              <div className="bg-card rounded-2xl shadow-sm p-6 border border-border">
-                <h2 className="text-lg font-black text-foreground mb-4">Content</h2>
-                <div className="space-y-2">
-                  <input type="text" className="w-full px-4 py-3 border border-border rounded-xl focus:border-primary focus:outline-none transition-all text-sm font-bold bg-card" placeholder="Enter text or numbers" value={content} onChange={(e) => setContent(e.target.value)} />
+              </ToolPanel>
+            )}
+          </>
+        ) : (
+          <>
+            <ToolPanel title={`Values · ${lines.length}`} actions={!batch && <button type="button" onClick={() => setBatch("SKU-0001\nSKU-0002\nSKU-0003\nSKU-0004")} className="h-7 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted">Sample</button>}>
+              <CodeArea value={batch} onChange={(e) => setBatch(e.target.value)} minHeight={140} placeholder="One value per line (up to 200)…" />
+            </ToolPanel>
+            {lines.length > 0 && (
+              <ToolPanel
+                title="Barcodes"
+                footer={<><span className="text-xs text-muted-foreground">{lines.filter((l) => !validate(o.format, l)).length} valid · {lines.filter((l) => validate(o.format, l)).length} skipped</span><span className="flex-1" /><Button variant="outline" onClick={() => window.print()}>Print sheet</Button><Button onClick={downloadZip} disabled={zipping}>{zipping ? <RefreshCw className="animate-spin" /> : <Download />} PNGs (.zip)</Button></>}
+              >
+                <div className="p-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 print:grid-cols-3" style={{ background: o.background }}>
+                  {lines.map((l, i) => {
+                    const err = validate(o.format, l);
+                    return err ? (
+                      <div key={i} className="rounded-md border border-destructive/40 p-2 text-xs text-destructive break-all">{l}: {err}</div>
+                    ) : (
+                      <svg key={`${i}-${l}-${JSON.stringify(o)}`} ref={(el) => { if (el) try { render(el, l, o); } catch { /* skip */ } }} className="max-w-full mx-auto" />
+                    );
+                  })}
                 </div>
-              </div>
-            </div>
-            <div className="lg:sticky lg:top-8 lg:h-fit">
-              <div className="relative rounded-[3rem] overflow-hidden shadow-xl shadow-primary/10 min-h-[400px] bg-gradient-to-br from-primary to-blue-700">
-                <div className="relative z-10 p-8 md:p-12 flex flex-col items-center justify-center text-center text-primary-foreground h-full min-h-[400px]">
-                  {content ? (
-                    <div className="bg-card p-6 md:p-8 rounded-[2rem] shadow-2xl shadow-black/20 text-foreground w-full max-w-sm flex flex-col items-center">
-                      <div className="flex items-center gap-2 mb-6 w-full"><div className="p-2 bg-primary/10 rounded-full"><BarcodeIcon className="w-5 h-5 text-primary" /></div><span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Barcode Preview</span></div>
-                      <div className="flex justify-center items-center overflow-hidden w-full bg-card rounded-lg p-4" style={{ backgroundColor: barcodeOptions.background }}>
-                        <canvas ref={canvasRef} />
-                      </div>
-                      <div className="mt-6 w-full bg-muted rounded-xl py-3 px-4 text-xs font-medium text-muted-foreground flex items-center justify-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>Ready to scan</div>
-                    </div>
-                  ) : (
-                    <div className="text-center text-primary-foreground/80">
-                      <div className="w-24 h-24 bg-card/10 rounded-full flex items-center justify-center mx-auto mb-6 backdrop-blur-sm border border-white/20"><BarcodeIcon className="w-12 h-12 text-primary-foreground" /></div>
-                      <h3 className="text-2xl font-black mb-2">Barcode Generator</h3>
-                      <p className="text-primary-100 font-medium max-w-xs mx-auto">Enter content on the left to see your barcode appear here.</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+              </ToolPanel>
+            )}
+          </>
+        )}
+      </OptionsLayout>
     </ToolLayout>
   );
 }
