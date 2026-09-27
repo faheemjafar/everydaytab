@@ -19,7 +19,7 @@ import textUnicode from "./text-unicode";
 import keywords from "./keywords";
 import integerBaseConverter from "./integer-base-converter";
 import emojiPicker from "./emoji-picker";
-import wysiwygEditor from "./wysiwyg-editor";
+import htmlEditor from "./html-editor";
 import imageCropper from "./image-cropper";
 import markdownEditor from "./markdown-editor";
 import markdownToHtml from "./markdown-to-html";
@@ -67,7 +67,6 @@ import muteVideo from "./mute-video";
 import ogDebugger from "./og-debugger";
 import pageNumbers from "./page-numbers";
 import pdfIntegrity from "./pdf-integrity";
-import portGenerator from "./port-generator";
 import removeBlankPages from "./remove-blank-pages";
 import ringtoneMaker from "./ringtone-maker";
 import rsaGenerator from "./rsa-generator";
@@ -101,7 +100,7 @@ const registry: Record<string, ToolContent> = {
   keywords,
   "integer-base-converter": integerBaseConverter,
   "emoji-picker": emojiPicker,
-  "wysiwyg-editor": wysiwygEditor,
+  "html-editor": htmlEditor,
   "image-cropper": imageCropper,
   "markdown-editor": markdownEditor,
   "markdown-to-html": markdownToHtml,
@@ -149,7 +148,6 @@ const registry: Record<string, ToolContent> = {
   "og-debugger": ogDebugger,
   "page-numbers": pageNumbers,
   "pdf-integrity": pdfIntegrity,
-  "port-generator": portGenerator,
   "remove-blank-pages": removeBlankPages,
   "ringtone-maker": ringtoneMaker,
   "rsa-generator": rsaGenerator,

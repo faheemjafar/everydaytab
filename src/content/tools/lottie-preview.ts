@@ -57,7 +57,7 @@ const content: ToolContent = {
       answer: "The preview is for validation. Edit colours and timing in After Effects or a Lottie editor, then re-check the export here.",
     },
   ],
-  related: ["svg-optimizer", "svg-path", "video-to-gif", "json-viewer", "json-formatter", "svg-jsx"],
+  related: ["svg-optimizer", "svg-path", "video-to-gif", "json-formatter", "svg-jsx"],
 };
 
 export default content;

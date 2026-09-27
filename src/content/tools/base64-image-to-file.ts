@@ -57,7 +57,7 @@ const content: ToolContent = {
       answer: "Use the Base64 File Converter, which produces the raw Base64 and a ready-made data URI.",
     },
   ],
-  related: ["base64-file", "base64", "data-uri", "image-converter", "svg-placeholder", "jwt-parser"],
+  related: ["base64-file", "base64", "image-converter", "svg-placeholder", "jwt-debugger"],
 };
 
 export default content;

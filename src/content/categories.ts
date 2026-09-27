@@ -33,7 +33,7 @@ export const categoryContent: Record<string, CategoryContent> = {
       "A working developer's toolbox: format and validate JSON, decode JWTs, test regular expressions, validate and explain cron expressions, convert curl commands and docker run lines, prettify SQL, generate TypeScript or Go types from JSON, inspect HTTP status codes and headers, and much more.",
       "Nothing you paste — tokens, connection strings, production payloads — is sent to a server. Each tool runs locally, so it is safe to use with real data during debugging.",
     ],
-    featured: ["json-formatter", "jwt-parser", "regex-tester", "cron-validator", "curl-converter", "json-ts", "sql-prettify", "url-parser"],
+    featured: ["json-formatter", "jwt-debugger", "regex", "crontab-generator", "curl-converter", "json-ts", "sql-prettify", "url-parser"],
     faqs: [
       { question: "Is it safe to paste a production JWT or API key here?", answer: "Yes. Decoding and formatting happen in your browser only; nothing is transmitted. Still, avoid pasting live secrets on shared or public machines." },
       { question: "Do the tools work offline?", answer: "Once a tool page has loaded it keeps working without a connection, because all processing is client-side." },
@@ -45,7 +45,7 @@ export const categoryContent: Record<string, CategoryContent> = {
       "Text tools for writers, students, editors and developers: count words and characters against platform limits, change case, remove duplicate or blank lines, sort and reverse lists, strip HTML, add line numbers, compare two versions of a document, generate placeholder copy and analyse readability.",
       "Everything runs locally — paste a manuscript, a legal document or a customer list and it stays on your machine.",
     ],
-    featured: ["word-counter", "case-converter", "text-diff", "text-cleaner", "text-sorter", "lorem-ipsum", "html-tag-stripper", "readability-analyzer"],
+    featured: ["word-counter", "case-converter", "text-diff", "text-cleaner", "text-sorter", "lorem-ipsum", "strip-html", "readability-analyzer"],
     faqs: [
       { question: "Is there a length limit for the text tools?", answer: "No practical limit. Because processing happens in your browser, even book-length documents are handled instantly." },
       { question: "Is my text stored anywhere?", answer: "No. Text lives in the page while you work and is discarded when you close the tab." },
@@ -101,7 +101,7 @@ export const categoryContent: Record<string, CategoryContent> = {
     intro: [
       "File utilities that run in your browser: create ZIP archives from multiple files, extract existing ZIPs, batch-rename files with patterns, and compress text. Because nothing is uploaded, they are safe for confidential documents and fast for large archives.",
     ],
-    featured: ["compressor", "extractor", "renamer", "text-compressor"],
+    featured: ["compressor", "extractor", "renamer"],
     faqs: [
       { question: "Can I open password-protected ZIP files?", answer: "Not currently — encrypted archives need the key to read their entries. Standard ZIPs, including nested folders and ZIP64 archives over 4 GB, are supported." },
     ],

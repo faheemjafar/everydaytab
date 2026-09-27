@@ -59,7 +59,7 @@ const content: ToolContent = {
       answer: "No. Parsing and generation run in your browser, so real API payloads and customer data stay on your device.",
     },
   ],
-  related: ["json-formatter", "json-ts", "json-go", "json-sql-schema", "json-viewer", "json-diff"],
+  related: ["json-formatter", "json-ts", "json-go", "json-sql", "json-diff"],
 };
 
 export default content;

@@ -59,7 +59,7 @@ const content: ToolContent = {
       answer: "No. Conversion happens entirely in your browser; your text is never uploaded.",
     },
   ],
-  related: ["markdown-editor", "html-markdown", "markdown-table-generator", "html-entities", "wysiwyg-editor", "markdown-cheatsheet"],
+  related: ["markdown-editor", "html-markdown", "markdown-table-generator", "html-entities", "html-editor", "markdown-cheatsheet"],
 };
 
 export default content;

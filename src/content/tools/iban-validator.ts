@@ -82,7 +82,7 @@ const content: ToolContent = {
         "The checksum can be valid while the underlying account is closed, doesn't exist, or belongs to a bank that doesn't accept the type of transfer you're sending. Double-check the account holder name and, for non-SEPA transfers, that you have the correct BIC as well.",
     },
   ],
-  related: ["invoice-generator", "phone-parser", "email-normalizer", "password-strength", "hash-generator"],
+  related: ["invoice-generator", "phone-parser", "password-strength", "hash-generator"],
 };
 
 export default content;

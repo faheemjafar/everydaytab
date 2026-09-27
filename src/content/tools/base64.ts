@@ -58,7 +58,7 @@ const content: ToolContent = {
       answer: "Yes — use the Base64 File Converter, which produces both the raw Base64 and a data URI with the correct MIME type.",
     },
   ],
-  related: ["base64-file", "base64-image-to-file", "url-encoder", "jwt-parser", "basic-auth", "text-unicode"],
+  related: ["base64-file", "base64-image-to-file", "url-encoder", "jwt-debugger", "basic-auth", "text-unicode"],
 };
 
 export default content;

@@ -62,7 +62,7 @@ const content: ToolContent = {
         "The generator outputs standard CSS. The mapping to Tailwind is direct — flex, flex-row, flex-wrap, justify-between, items-center, gap-4 — so you can translate the generated rules line by line.",
     },
   ],
-  related: ["css-grid", "box-shadow", "gradient-studio", "glassmorphism", "media-query", "aspect-ratio"],
+  related: ["css-grid", "box-shadow", "gradient-studio", "glassmorphism", "aspect-ratio"],
 };
 
 export default content;

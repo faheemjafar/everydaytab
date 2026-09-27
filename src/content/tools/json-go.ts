@@ -58,7 +58,7 @@ const content: ToolContent = {
       answer: "No. Conversion runs in your browser, so production payloads and credentials stay on your machine.",
     },
   ],
-  related: ["json-ts", "json-schema", "json-formatter", "json-viewer", "json-sql-schema", "json-yaml"],
+  related: ["json-ts", "json-schema", "json-formatter", "json-sql", "json-yaml"],
 };
 
 export default content;

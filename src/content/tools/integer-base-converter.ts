@@ -62,7 +62,7 @@ const content: ToolContent = {
         "Base 16 needs sixteen distinct digit symbols, and we only have ten numerals, so A–F stand for the values 10–15.",
     },
   ],
-  related: ["text-binary", "chmod-calculator", "subnet-calculator", "roman-numeral-converter", "color-converter", "hash-text"],
+  related: ["text-binary", "chmod-calculator", "subnet-calculator", "roman-numeral-converter", "color-converter", "hash-generator"],
 };
 
 export default content;

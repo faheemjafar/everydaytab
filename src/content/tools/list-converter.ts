@@ -59,7 +59,7 @@ const content: ToolContent = {
       answer: "No. All operations run locally; nothing is transmitted or stored.",
     },
   ],
-  related: ["text-sorter", "text-cleaner", "case-converter", "text-repeater", "email-normalizer", "json-csv"],
+  related: ["text-sorter", "text-cleaner", "case-converter", "text-repeater", "json-csv"],
 };
 
 export default content;

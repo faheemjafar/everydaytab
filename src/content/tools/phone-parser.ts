@@ -59,7 +59,7 @@ const content: ToolContent = {
       answer: "No. Parsing runs entirely in your browser.",
     },
   ],
-  related: ["email-normalizer", "iban-validator", "mac-address", "user-agent-parser", "url-parser", "formal-email-generator"],
+  related: ["iban-validator", "user-agent-parser", "url-parser", "formal-email-generator"],
 };
 
 export default content;

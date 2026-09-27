@@ -60,7 +60,7 @@ const content: ToolContent = {
       answer: "No. Parsing happens in your browser, so secrets and internal manifests stay on your machine.",
     },
   ],
-  related: ["json-yaml", "toml-yaml", "json-viewer", "json-formatter", "docker-compose-converter", "xml-formatter"],
+  related: ["json-yaml", "json-toml", "json-formatter", "docker-compose-converter", "xml-formatter"],
 };
 
 export default content;

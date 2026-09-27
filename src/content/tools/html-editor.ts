@@ -61,7 +61,7 @@ const content: ToolContent = {
       answer: "Yes — the source panel is editable, and changes are reflected in the visual editor immediately.",
     },
   ],
-  related: ["html-editor", "html-markdown", "html-tag-stripper", "markdown-editor", "html-entities", "base64-file"],
+  related: ["html-markdown", "strip-html", "markdown-editor", "html-entities", "base64-file"],
 };
 
 export default content;

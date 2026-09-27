@@ -62,7 +62,7 @@ const content: ToolContent = {
       answer: "Base64 encodes every 3 bytes as 4 text characters, so output is always about 33% larger than the input, plus a few bytes for the data URI prefix.",
     },
   ],
-  related: ["base64-image-to-file", "base64-encoder", "base64", "data-uri", "image-compressor", "svg-placeholder"],
+  related: ["base64-image-to-file", "base64", "base64-file", "image-compressor", "svg-placeholder"],
 };
 
 export default content;

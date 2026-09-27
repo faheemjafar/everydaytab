@@ -60,7 +60,7 @@ const content: ToolContent = {
       answer: "The Combine Markdown tool merges multiple .md files into one document that you can then edit here.",
     },
   ],
-  related: ["markdown-to-html", "markdown-table-generator", "markdown-cheatsheet", "combine-markdown", "html-markdown", "wysiwyg-editor"],
+  related: ["markdown-to-html", "markdown-table-generator", "markdown-cheatsheet", "combine-markdown", "html-markdown", "html-editor"],
 };
 
 export default content;

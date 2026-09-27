@@ -61,7 +61,7 @@ const content: ToolContent = {
         "Click the padlock in your browser and view the certificate, or export it with openssl s_client and paste the PEM here to see the full details.",
     },
   ],
-  related: ["rsa-generator", "jwt-parser", "hash-generator", "base64", "url-parser", "http-status-codes"],
+  related: ["rsa-generator", "jwt-debugger", "hash-generator", "base64", "url-parser", "http-status-codes"],
 };
 
 export default content;

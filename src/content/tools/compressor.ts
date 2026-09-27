@@ -57,7 +57,7 @@ const content: ToolContent = {
       answer: "No. Compression happens locally; the files and the archive never leave your device.",
     },
   ],
-  related: ["extractor", "renamer", "image-compressor", "compress-pdf", "video-compressor", "text-compressor"],
+  related: ["extractor", "renamer", "image-compressor", "compress-pdf", "video-compressor"],
 };
 
 export default content;
