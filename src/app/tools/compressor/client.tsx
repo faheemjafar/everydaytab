@@ -1,107 +1,128 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import { useState } from "react";
+import { Archive, Download, FolderOpen, RefreshCw } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Minimize2, Download, Trash2, File, AlertCircle, FolderArchive, Upload, Zap, Layers } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Field, FileDropzone, FileList, FileListItem, formatBytes, OptionsLayout, PrivacyNote, Segmented, Stat, StatGrid, ToolAlert, ToolPanel, Toggle } from "@/components/tool";
 
-const formatFileSize = (bytes: number): string => { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`; if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`; return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`; };
+interface Entry { id: number; file: File; path: string }
+type Level = "store" | "fast" | "normal" | "max";
+const LEVELS: Record<Level, number> = { store: 0, fast: 1, normal: 6, max: 9 };
+// Already-compressed formats barely shrink; storing them saves time.
+const PRECOMPRESSED = /\.(jpe?g|png|gif|webp|avif|heic|mp[34]|m4a|aac|ogg|opus|webm|mkv|mov|zip|gz|7z|rar|xz|bz2|zst|docx|xlsx|pptx|pdf|woff2?)$/i;
+
+let nid = 1;
 
 export default function FileCompressor() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [isCompressing, setIsCompressing] = useState(false);
-  const [zipSize, setZipSize] = useState<number>(0);
-  const [zipBlob, setZipBlob] = useState<Blob | null>(null);
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [level, setLevel] = useState<Level>("normal");
+  const [smart, setSmart] = useState(true);
+  const [name, setName] = useState("archive");
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [result, setResult] = useState<{ blob: Blob; key: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFilesSelected = (newFiles: File[]) => { setFiles(prev => [...prev, ...newFiles]); setError(null); };
-  const handleClearFiles = () => { setFiles([]); setZipBlob(null); setZipSize(0); setError(null); };
-
-  const handleCompress = async () => {
-    if (files.length === 0) return;
-    setIsCompressing(true); setError(null);
-    try {
-      const JSZip = (await import("jszip")).default;
-      const zip = new JSZip();
-      for (const file of files) { const content = await file.arrayBuffer(); zip.file(file.name, content, { compression: 'DEFLATE', compressionOptions: { level: 6 } }); }
-      const zipContent = await zip.generateAsync({ type: 'blob' });
-      setZipSize(zipContent.size); setZipBlob(zipContent);
-    } catch (err) { setError((err as Error)?.message || 'Compression failed'); }
-    finally { setIsCompressing(false); }
+  const add = (files: File[]) => {
+    setEntries((cur) => {
+      const taken = new Set(cur.map((e) => e.path));
+      const next = files.map((file) => {
+        // Keep folder structure when a directory is picked; de-duplicate clashing names.
+        let path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+        const dot = path.lastIndexOf(".");
+        for (let i = 2; taken.has(path); i++) path = dot > 0 ? `${path.slice(0, dot)} (${i})${path.slice(dot)}` : `${path} (${i})`;
+        taken.add(path);
+        return { id: nid++, file, path };
+      });
+      return [...cur, ...next];
+    });
+    setError(null);
   };
 
-  const handleDownload = () => { if (!zipBlob) return; const blobUrl = URL.createObjectURL(zipBlob); const a = document.createElement('a'); a.href = blobUrl; a.download = 'compressed_files.zip'; a.click(); setTimeout(() => URL.revokeObjectURL(blobUrl), 100); };
+  const key = `${entries.map((e) => e.id).join(",")}|${level}|${smart}`;
+  const total = entries.reduce((s, e) => s + e.file.size, 0);
+  const fresh = result?.key === key ? result.blob : null;
 
-  const totalOriginalSize = files.reduce((sum, f) => sum + f.size, 0);
-  const efficiency = totalOriginalSize > 0 ? Math.max(0, Math.round(((totalOriginalSize - zipSize) / totalOriginalSize) * 100)) : 0;
+  const compress = async () => {
+    setBusy(true);
+    setProgress(0);
+    setError(null);
+    try {
+      const { default: JSZip } = await import("jszip");
+      const zip = new JSZip();
+      for (const e of entries) {
+        const store = level === "store" || (smart && PRECOMPRESSED.test(e.path));
+        zip.file(e.path, e.file, { compression: store ? "STORE" : "DEFLATE", compressionOptions: { level: LEVELS[level] || 1 }, date: new Date(e.file.lastModified) });
+      }
+      const blob = await zip.generateAsync({ type: "blob", streamFiles: true }, (m) => setProgress(m.percent));
+      setResult({ blob, key });
+    } catch (e) {
+      setError((e as Error).message || "Compression failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const download = () => {
+    if (!fresh) return;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(fresh);
+    a.download = `${name.trim() || "archive"}.zip`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+
+  const options = (
+    <ToolPanel
+      title="Archive"
+      bodyClassName="p-3 space-y-3"
+      footer={
+        <div className="w-full space-y-2">
+          {fresh ? (
+            <Button size="lg" onClick={download} className="w-full"><Download /> Download {name || "archive"}.zip</Button>
+          ) : (
+            <Button size="lg" onClick={compress} disabled={!entries.length || busy} className="w-full">{busy ? <RefreshCw className="animate-spin" /> : <Archive />} {busy ? `Compressing ${Math.round(progress)}%` : "Create ZIP"}</Button>
+          )}
+          <PrivacyNote>Compressed in your browser — files are never uploaded.</PrivacyNote>
+        </div>
+      }
+    >
+      <Field label="File name" htmlFor="zn"><div className="flex items-center gap-1"><Input id="zn" value={name} onChange={(e) => setName(e.target.value)} /><span className="text-sm text-muted-foreground">.zip</span></div></Field>
+      <Field label="Compression"><Segmented size="sm" value={level} onChange={setLevel} options={[{ value: "store", label: "None" }, { value: "fast", label: "Fast" }, { value: "normal", label: "Normal" }, { value: "max", label: "Maximum" }]} /></Field>
+      <Toggle label="Skip already-compressed files" hint="JPG, PNG, MP4, PDF, DOCX… are stored as-is — they barely shrink and compress slowly." checked={smart} onChange={setSmart} />
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="compressor">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-8">
-          {files.length === 0 ? (
-            <Card className="border-2 border-dashed border-border/60 bg-card/30 backdrop-blur-sm rounded-[2.5rem] h-[500px] flex flex-col items-center justify-center space-y-6 transition-all hover:border-primary/20 hover:bg-primary/[0.02] cursor-pointer group" onClick={() => fileInputRef.current?.click()}>
-              <div className="w-20 h-20 rounded-3xl bg-primary/5 flex items-center justify-center text-primary group-hover:scale-110 transition-transform"><Upload className="w-10 h-10" /></div>
-              <div className="text-center space-y-2"><p className="text-xl font-bold">Upload files</p><p className="text-sm text-muted-foreground">Click or drag and drop to compress into ZIP</p></div>
-              <Button className="rounded-2xl px-8 h-12 bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20">Browse Files</Button>
-              <input type="file" multiple ref={fileInputRef} onChange={(e) => { if (e.target.files) handleFilesSelected(Array.from(e.target.files)); }} className="hidden" />
-            </Card>
-          ) : (
-            <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between">
-                <div className="flex items-center gap-3"><FolderArchive className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Files ({files.length})</span></div>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-red-500" onClick={handleClearFiles}><Trash2 className="w-4 h-4" /></Button>
-              </div>
-              <CardContent className="p-8 space-y-3">
-                {files.map((file, i) => (
-                  <div key={i} className="flex items-center justify-between p-4 bg-muted/30 rounded-xl border border-border hover:border-primary/20 transition-all">
-                    <div className="flex items-center gap-3"><File className="w-5 h-5 text-primary" /><span className="text-sm font-bold text-foreground">{file.name}</span></div>
-                    <span className="text-xs font-mono font-bold text-muted-foreground">{formatFileSize(file.size)}</span>
-                  </div>
-                ))}
-                <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-border/40 rounded-2xl p-6 text-center cursor-pointer hover:border-primary/30 hover:bg-primary/[0.02] transition-all mt-4">
-                  <input type="file" multiple ref={fileInputRef} onChange={(e) => { if (e.target.files) handleFilesSelected(Array.from(e.target.files)); }} className="hidden" />
-                  <p className="text-sm text-muted-foreground font-medium">+ Add more files</p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-          {error && (<div className="mt-6 flex items-center gap-3 p-4 rounded-2xl bg-red-50 border border-red-200 text-red-600 text-sm font-bold"><AlertCircle className="w-5 h-5 flex-shrink-0" />{error}</div>)}
-        </div>
-
-        <div className="lg:col-span-4 space-y-6 sticky top-24">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><Zap className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Actions</span></div>
-            <CardContent className="p-8 space-y-4">
-              <Button onClick={handleCompress} disabled={files.length === 0 || isCompressing} className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]">
-                {isCompressing ? <Minimize2 className="w-5 h-5 animate-spin" /> : <Minimize2 className="w-5 h-5 mr-2" />}
-                {isCompressing ? 'Compressing...' : 'Compress to ZIP'}
-              </Button>
-              {zipBlob && (
-                <Button onClick={handleDownload} variant="outline" className="w-full h-12 rounded-xl border-border/50 font-bold"><Download className="w-4 h-4 mr-2" /> Download ZIP</Button>
-              )}
-              <Button onClick={handleClearFiles} variant="outline" className="w-full h-12 rounded-xl border-border/50 font-bold text-muted-foreground"><Trash2 className="w-4 h-4 mr-2" /> Clear All</Button>
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><Layers className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Compression Stats</span></div>
-            <CardContent className="p-6 space-y-3">
-              {totalOriginalSize > 0 ? (
-                <div className="space-y-2">
-                  <div className="flex justify-between p-3 rounded-xl bg-muted/30"><span className="text-[10px] font-bold uppercase text-muted-foreground">Original</span><span className="text-xs font-mono font-bold">{formatFileSize(totalOriginalSize)}</span></div>
-                  <div className="flex justify-between p-3 rounded-xl bg-muted/30"><span className="text-[10px] font-bold uppercase text-muted-foreground">Compressed</span><span className="text-xs font-mono font-bold">{zipSize > 0 ? formatFileSize(zipSize) : '—'}</span></div>
-                  <div className="flex justify-between p-3 rounded-xl bg-primary/5 border border-primary/10"><span className="text-[10px] font-bold uppercase text-primary/70">Space Saved</span><span className="text-xs font-mono font-bold text-primary">{efficiency > 0 ? `${efficiency}%` : '—'}</span></div>
-                </div>
-              ) : (
-                <div className="py-8 flex flex-col items-center justify-center text-center space-y-3 opacity-20"><FolderArchive className="w-10 h-10" /><p className="text-xs font-medium">No files uploaded</p></div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      <OptionsLayout options={options}>
+        <FileDropzone onFiles={add} multiple size={entries.length ? "sm" : "lg"} title={entries.length ? "Add more files" : "Drop files here or click to browse"} hint="Any file type, any size your browser's memory allows." />
+        <label className="inline-flex items-center gap-2 h-8 px-2.5 rounded-md border border-input text-[13px] cursor-pointer hover:bg-muted w-fit">
+          <FolderOpen className="w-4 h-4" /> Add a folder
+          <input type="file" className="sr-only" multiple {...({ webkitdirectory: "" } as object)} onChange={(e) => { add(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+        </label>
+        {error && <ToolAlert tone="error">{error}</ToolAlert>}
+        {entries.length > 0 && (
+          <>
+            {fresh && (
+              <StatGrid>
+                <Stat label="Original" value={formatBytes(total)} />
+                <Stat label="ZIP" value={formatBytes(fresh.size)} />
+                <Stat label="Saved" value={`${Math.max(0, Math.round((1 - fresh.size / total) * 100))}%`} />
+                <Stat label="Files" value={String(entries.length)} />
+              </StatGrid>
+            )}
+            <FileList className="max-h-[420px] overflow-y-auto custom-scrollbar">
+              {entries.map((e, i) => (
+                <FileListItem key={e.id} index={i} name={e.path} meta={`${formatBytes(e.file.size)}${smart && PRECOMPRESSED.test(e.path) ? " · stored" : ""}`} onRemove={() => setEntries((x) => x.filter((y) => y.id !== e.id))} />
+              ))}
+            </FileList>
+            <div className="flex justify-between text-xs text-muted-foreground"><span>{entries.length} files · {formatBytes(total)}</span><button type="button" onClick={() => { setEntries([]); setResult(null); }} className="hover:text-foreground">Clear all</button></div>
+          </>
+        )}
+      </OptionsLayout>
     </ToolLayout>
   );
 }

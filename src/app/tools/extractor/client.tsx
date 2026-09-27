@@ -1,112 +1,123 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import { useMemo, useState } from "react";
+import type JSZip from "jszip";
+import { Download, File as FileIcon, Folder, RefreshCw, X } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { FileArchive, Download, Trash2, AlertCircle, File, Upload, Zap, FolderOpen } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { FileDropzone, formatBytes, PrivacyNote, StatusBadge, ToolAlert, ToolPanel } from "@/components/tool";
+import { cn } from "@/lib/utils";
+
+interface Item { path: string; size: number; date: Date; entry: JSZip.JSZipObject }
+const TEXT = /\.(txt|md|json|csv|xml|html?|css|js|ts|tsx|jsx|yml|yaml|toml|ini|log|py|sh|sql|svg|env|gitignore)$/i;
+const IMAGE = /\.(png|jpe?g|gif|webp|avif|bmp|ico|svg)$/i;
+// macOS resource forks and Finder metadata aren't user files.
+const JUNK = /(^|\/)(__MACOSX\/|\.DS_Store$|Thumbs\.db$)/;
+
+const save = (blob: Blob, name: string) => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
 
 export default function ZipExtractor() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [extractedFiles, setExtractedFiles] = useState<Array<{ name: string; content: Blob; archiveName: string }>>([]);
-  const [isExtracting, setIsExtracting] = useState(false);
+  const [archive, setArchive] = useState<{ name: string; items: Item[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [hideJunk, setHideJunk] = useState(true);
+  const [preview, setPreview] = useState<{ path: string; text?: string; url?: string } | null>(null);
 
-  const handleFilesSelected = (newFiles: File[]) => {
+  const open = async ([file]: File[]) => {
+    if (!file) return;
+    setBusy(true);
     setError(null);
-    const validFiles = newFiles.filter(f => f.name.toLowerCase().endsWith('.zip'));
-    if (validFiles.length !== newFiles.length) setError("Only ZIP files are supported.");
-    setFiles(prev => [...prev, ...validFiles]);
-  };
-
-  const handleRemoveFile = (index: number) => { setFiles(files.filter((_, i) => i !== index)); setExtractedFiles([]); setError(null); };
-  const handleClearAll = () => { setFiles([]); setExtractedFiles([]); setError(null); };
-
-  const extractFiles = async () => {
-    if (!files.length) return;
-    setIsExtracting(true); setExtractedFiles([]); setError(null);
+    setPreview(null);
     try {
-      const JSZip = (await import("jszip")).default;
-      const allExtracted: Array<{ name: string; content: Blob; archiveName: string }> = [];
-      for (const file of files) {
-        try {
-          const zip = new JSZip();
-          const content = await file.arrayBuffer();
-          const loadedZip = await zip.loadAsync(content);
-          const filePromises: Promise<{ name: string; content: Blob; archiveName: string }>[] = [];
-          loadedZip.forEach((_, zipEntry) => { if (!zipEntry.dir) filePromises.push(zipEntry.async('blob').then(fileData => ({ name: zipEntry.name, content: fileData, archiveName: file.name }))); });
-          const extracted = await Promise.all(filePromises);
-          allExtracted.push(...extracted);
-        } catch (fileError) { setError(`Failed to extract ${file.name}. Ensure it's a valid ZIP file.`); }
-      }
-      setExtractedFiles(allExtracted);
-      if (allExtracted.length === 0 && !error) setError('No files were extracted.');
-    } catch (err) { setError(`Extraction failed: ${(err as Error)?.message || 'Unknown error'}`); }
-    finally { setIsExtracting(false); }
+      const { default: Zip } = await import("jszip");
+      const zip = await Zip.loadAsync(file);
+      const items: Item[] = [];
+      zip.forEach((path, entry) => {
+        if (!entry.dir) items.push({ path, size: (entry as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0, date: entry.date, entry });
+      });
+      items.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
+      setArchive({ name: file.name, items });
+    } catch (e) {
+      const m = (e as Error).message || "";
+      setError(/encrypt/i.test(m) ? "This ZIP is password-protected, which isn't supported in the browser." : /end of central directory|corrupted|not a zip/i.test(m) ? "Not a valid ZIP archive (RAR, 7z and TAR aren't supported)." : m);
+      setArchive(null);
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const downloadFile = (file: { name: string; content: Blob }) => { const url = URL.createObjectURL(file.content); const a = document.createElement('a'); a.href = url; a.download = file.name; a.click(); URL.revokeObjectURL(url); };
+  const shown = useMemo(() => (archive?.items ?? []).filter((i) => (!hideJunk || !JUNK.test(i.path)) && (!filter || i.path.toLowerCase().includes(filter.toLowerCase()))), [archive, filter, hideJunk]);
+  const total = shown.reduce((s, i) => s + i.size, 0);
+
+  const show = async (i: Item) => {
+    if (preview?.url) URL.revokeObjectURL(preview.url);
+    if (IMAGE.test(i.path)) {
+      const blob = await i.entry.async("blob");
+      setPreview({ path: i.path, url: URL.createObjectURL(i.path.endsWith(".svg") ? new Blob([blob], { type: "image/svg+xml" }) : blob) });
+    } else if (TEXT.test(i.path) && i.size < 2_000_000) setPreview({ path: i.path, text: await i.entry.async("string") });
+    else setPreview(null);
+  };
+
+  const downloadOne = async (i: Item) => save(await i.entry.async("blob"), i.path.split("/").pop()!);
+
+  if (!archive)
+    return (
+      <ToolLayout toolId="extractor">
+        <div className="space-y-3">
+          <FileDropzone onFiles={open} accept=".zip,application/zip,application/x-zip-compressed" title={busy ? "Reading archive…" : "Drop a ZIP file here or click to browse"} hint="Browse the contents and download only what you need." icon={busy ? <RefreshCw className="animate-spin" /> : undefined} />
+          {error && <ToolAlert tone="error">{error}</ToolAlert>}
+          <PrivacyNote>Opened locally — the archive is never uploaded.</PrivacyNote>
+        </div>
+      </ToolLayout>
+    );
 
   return (
     <ToolLayout toolId="extractor">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-8 space-y-6">
-          {files.length === 0 ? (
-            <Card className="border-2 border-dashed border-border/60 bg-card/30 backdrop-blur-sm rounded-[2.5rem] h-[500px] flex flex-col items-center justify-center space-y-6 transition-all hover:border-primary/20 hover:bg-primary/[0.02] cursor-pointer group" onClick={() => fileInputRef.current?.click()}>
-              <div className="w-20 h-20 rounded-3xl bg-primary/5 flex items-center justify-center text-primary group-hover:scale-110 transition-transform"><Upload className="w-10 h-10" /></div>
-              <div className="text-center space-y-2"><p className="text-xl font-bold">Upload ZIP archives</p><p className="text-sm text-muted-foreground">Click or drag and drop to extract files</p></div>
-              <Button className="rounded-2xl px-8 h-12 bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20">Browse Files</Button>
-              <input type="file" accept=".zip" multiple ref={fileInputRef} onChange={(e) => { if (e.target.files) handleFilesSelected(Array.from(e.target.files)); }} className="hidden" />
-            </Card>
+      <div className="grid gap-3 lg:grid-cols-[1fr_380px]">
+        <ToolPanel
+          title={archive.name}
+          actions={<><StatusBadge>{shown.length} files · {formatBytes(total)}</StatusBadge><Button variant="ghost" size="icon-sm" onClick={() => { setArchive(null); setPreview(null); }} aria-label="Close archive"><X /></Button></>}
+          bodyClassName="p-0"
+        >
+          <div className="flex items-center gap-3 px-3 py-2 border-b border-border">
+            <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter files…" className="h-8 max-w-60" />
+            <label className="inline-flex items-center gap-2 text-[12px] text-muted-foreground"><input type="checkbox" checked={hideJunk} onChange={(e) => setHideJunk(e.target.checked)} className="size-3.5 accent-primary" />Hide __MACOSX / .DS_Store</label>
+          </div>
+          <ul className="divide-y divide-border max-h-[560px] overflow-y-auto custom-scrollbar">
+            {shown.map((i) => {
+              const parts = i.path.split("/");
+              return (
+                <li key={i.path} className={cn("group flex items-center gap-2 px-3 h-9 text-[13px] cursor-pointer hover:bg-muted/50", preview?.path === i.path && "bg-accent/40")} onClick={() => show(i)}>
+                  <FileIcon className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 min-w-0 truncate">
+                    {parts.length > 1 && <span className="text-muted-foreground"><Folder className="inline w-3 h-3 -mt-0.5 mr-0.5" />{parts.slice(0, -1).join("/")}/</span>}
+                    {parts[parts.length - 1]}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground tabular-nums">{formatBytes(i.size)}</span>
+                  <Button variant="ghost" size="icon-sm" onClick={(e) => { e.stopPropagation(); downloadOne(i); }} aria-label={`Download ${i.path}`} className="opacity-60 group-hover:opacity-100"><Download /></Button>
+                </li>
+              );
+            })}
+          </ul>
+        </ToolPanel>
+        <ToolPanel title={preview ? preview.path.split("/").pop() : "Preview"} className="lg:sticky lg:top-3 self-start">
+          {preview?.url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={preview.url} alt="" className="max-h-[480px] w-full object-contain bg-muted/30" />
+          ) : preview?.text !== undefined ? (
+            <pre className="p-3 font-mono text-[11.5px] max-h-[480px] overflow-auto custom-scrollbar whitespace-pre-wrap break-all">{preview.text.slice(0, 200_000)}</pre>
           ) : (
-            <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center justify-between">
-                <div className="flex items-center gap-3"><FileArchive className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">ZIP Archives ({files.length})</span></div>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-red-500" onClick={handleClearAll}><Trash2 className="w-4 h-4" /></Button>
-              </div>
-              <CardContent className="p-8 space-y-3">
-                {files.map((file, i) => (
-                  <div key={i} className="flex items-center justify-between p-4 bg-muted/30 rounded-xl border border-border hover:border-primary/20 transition-all">
-                    <div className="flex items-center gap-3"><File className="w-5 h-5 text-primary" /><span className="text-sm font-bold text-foreground">{file.name}</span></div>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:text-red-500" onClick={() => handleRemoveFile(i)}><Trash2 className="w-4 h-4" /></Button>
-                  </div>
-                ))}
-                <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-border/40 rounded-2xl p-6 text-center cursor-pointer hover:border-primary/30 hover:bg-primary/[0.02] transition-all mt-4">
-                  <input type="file" accept=".zip" multiple ref={fileInputRef} onChange={(e) => { if (e.target.files) handleFilesSelected(Array.from(e.target.files)); }} className="hidden" />
-                  <p className="text-sm text-muted-foreground font-medium">+ Add more ZIP files</p>
-                </div>
-              </CardContent>
-            </Card>
+            <p className="px-3.5 py-10 text-center text-xs text-muted-foreground">Click a text or image file to preview it. Use the download icon to save any file.</p>
           )}
-          {extractedFiles.length > 0 && (
-            <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <div className="px-8 py-6 border-b border-border/40 bg-muted/30 flex items-center gap-3"><FolderOpen className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Extracted Files ({extractedFiles.length})</span></div>
-              <CardContent className="p-8 space-y-3">
-                {extractedFiles.map((file, i) => (
-                  <div key={i} className="flex items-center justify-between p-4 bg-muted/30 rounded-xl border border-border hover:border-primary/20 transition-all">
-                    <div className="flex items-center gap-3"><File className="w-5 h-5 text-primary" /><span className="text-sm font-bold text-foreground">{file.name}</span></div>
-                    <Button onClick={() => downloadFile(file)} variant="outline" size="sm" className="rounded-xl font-bold"><Download className="w-4 h-4 mr-2" /> Download</Button>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
-          {error && (<div className="flex items-center gap-3 p-4 rounded-2xl bg-red-50 border border-red-200 text-red-600 text-sm font-bold"><AlertCircle className="w-5 h-5 flex-shrink-0" />{error}</div>)}
-        </div>
-
-        <div className="lg:col-span-4 space-y-6 sticky top-24">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><Zap className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Actions</span></div>
-            <CardContent className="p-8 space-y-4">
-              <Button onClick={extractFiles} disabled={files.length === 0 || isExtracting} className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]">
-                {isExtracting ? <FileArchive className="w-5 h-5 animate-spin" /> : <FileArchive className="w-5 h-5 mr-2" />}
-                {isExtracting ? 'Extracting...' : 'Extract ZIP'}
-              </Button>
-              <Button onClick={handleClearAll} variant="outline" className="w-full h-12 rounded-xl border-border/50 font-bold text-muted-foreground"><Trash2 className="w-4 h-4 mr-2" /> Clear All</Button>
-            </CardContent>
-          </Card>
-        </div>
+        </ToolPanel>
       </div>
     </ToolLayout>
   );

@@ -1,96 +1,141 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import { useMemo, useRef } from "react";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
+import { Bold, Code, Heading2, Italic, Link2, List, ListChecks, ListOrdered, Quote, Strikethrough, Table } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Copy, CheckCircle2, Download, Trash2, Eye, Code, FileText, Zap, LayoutTemplate } from "lucide-react";
-import { marked } from "marked";
+import { ClearButton, CopyButton, DownloadButton, Segmented, StatusBadge, ToolPanel } from "@/components/tool";
+import { createLocalStore, useLocalStore, useMounted } from "@/lib/local-store";
 import { cn } from "@/lib/utils";
 
-export default function MarkdownEditor() {
-  const [markdown, setMarkdown] = useState(`# Welcome to Markdown Editor
+const WELCOME = `# Welcome
 
-## Edit on the left, preview on the right
+Write **Markdown** on the left and see it rendered on the right. Your text is saved in this browser automatically.
 
-**Features:**
-- Real-time preview
-- Syntax highlighting
-- File upload/download
-- Responsive layout
+## Formatting
 
-Try these examples:
+- **Bold** (Ctrl/⌘+B), *italic* (Ctrl/⌘+I), ~~strikethrough~~, \`inline code\`
+- [Links](https://example.com) (Ctrl/⌘+K)
+- [x] Task lists
 
-\`\`\`javascript
-function hello() {
-  console.log("Markdown is awesome!");
-}
+> Blockquotes for callouts.
+
+| Feature | Supported |
+| ------- | :-------: |
+| Tables  | ✓ |
+| GFM     | ✓ |
+
+\`\`\`js
+console.log("Code blocks too");
 \`\`\`
+`;
 
-> This is a blockquote example
+const doc = createLocalStore<string>("markdown-editor-doc", WELCOME, (r) => (typeof r === "string" ? r : WELCOME));
+const layout = createLocalStore<"split" | "write" | "preview">("markdown-editor-layout", "split");
 
-| Feature | Status |
-|---------|--------|
-| Preview | Yes |
-| Upload  | Yes |
-| Export  | Yes |
+type Action = { icon: typeof Bold; label: string; key?: string; wrap?: [string, string]; line?: string; block?: string };
+const ACTIONS: Action[] = [
+  { icon: Heading2, label: "Heading", line: "## " },
+  { icon: Bold, label: "Bold", key: "b", wrap: ["**", "**"] },
+  { icon: Italic, label: "Italic", key: "i", wrap: ["*", "*"] },
+  { icon: Strikethrough, label: "Strikethrough", wrap: ["~~", "~~"] },
+  { icon: Code, label: "Code", key: "e", wrap: ["`", "`"] },
+  { icon: Link2, label: "Link", key: "k", wrap: ["[", "](https://)"] },
+  { icon: Quote, label: "Quote", line: "> " },
+  { icon: List, label: "Bullet list", line: "- " },
+  { icon: ListOrdered, label: "Numbered list", line: "1. " },
+  { icon: ListChecks, label: "Task list", line: "- [ ] " },
+  { icon: Table, label: "Table", block: "\n| Column | Column |\n| ------ | ------ |\n| Cell   | Cell   |\n" },
+];
 
-[Learn more about Markdown](https://www.markdownguide.org)
-`);
-  const [copied, setCopied] = useState(false);
-  const [viewMode, setViewMode] = useState<'split' | 'edit' | 'preview'>('split');
-  const [html, setHtml] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+export default function MarkdownEditor() {
+  const mounted = useMounted();
+  const [text, setText] = useLocalStore(doc);
+  const [view, setView] = useLocalStore(layout);
+  const ta = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => { try { setHtml(marked.parse(markdown) as string); } catch { setHtml(""); } }, [markdown]);
+  const html = useMemo(() => (mounted ? DOMPurify.sanitize(marked.parse(text, { gfm: true, async: false }) as string) : ""), [text, mounted]);
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => { const content = e.target?.result as string; setMarkdown(content); };
-    reader.readAsText(file); e.target.value = '';
+  const apply = (a: Action) => {
+    const el = ta.current;
+    if (!el) return;
+    const { selectionStart: s, selectionEnd: e, value } = el;
+    let next: string;
+    let cs = s;
+    let ce = e;
+    if (a.wrap) {
+      const sel = value.slice(s, e) || a.label.toLowerCase();
+      next = value.slice(0, s) + a.wrap[0] + sel + a.wrap[1] + value.slice(e);
+      cs = s + a.wrap[0].length;
+      ce = cs + sel.length;
+    } else if (a.line) {
+      // Prefix every selected line.
+      const ls = value.lastIndexOf("\n", s - 1) + 1;
+      const chunk = value.slice(ls, e).split("\n").map((l) => a.line + l).join("\n");
+      next = value.slice(0, ls) + chunk + value.slice(e);
+      cs = ls;
+      ce = ls + chunk.length;
+    } else {
+      next = value.slice(0, s) + a.block + value.slice(e);
+      cs = ce = s + a.block!.length;
+    }
+    setText(next);
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(cs, ce); });
   };
 
-  const copyToClipboard = async () => { try { await navigator.clipboard.writeText(markdown); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (err) { console.error(err); } };
-  const downloadMarkdown = () => { const blob = new Blob([markdown], { type: 'text/markdown' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'document.md'; a.click(); URL.revokeObjectURL(url); };
+  const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!(e.metaKey || e.ctrlKey)) {
+      if (e.key === "Tab") { e.preventDefault(); apply({ icon: Code, label: "", block: "  " }); }
+      return;
+    }
+    const a = ACTIONS.find((x) => x.key === e.key.toLowerCase());
+    if (a) { e.preventDefault(); apply(a); }
+  };
+
+  const htmlDoc = `<!doctype html>\n<html><head><meta charset="utf-8"><title>Document</title></head>\n<body>\n${html}\n</body></html>`;
 
   return (
     <ToolLayout toolId="markdown-editor">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-8 space-y-6">
-          <div className={`grid ${viewMode === 'split' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'} gap-6`}>
-            {(viewMode === 'split' || viewMode === 'edit') && (
-              <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-                <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><Code className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Editor</span></div>
-                <CardContent className="p-6"><textarea value={markdown} onChange={(e) => setMarkdown(e.target.value)} rows={20} className="w-full px-4 py-4 bg-muted/30 border-transparent rounded-2xl focus:border-primary/20 text-sm font-mono text-foreground leading-relaxed resize-none placeholder:font-normal" /></CardContent>
-              </Card>
-            )}
-            {(viewMode === 'split' || viewMode === 'preview') && (
-              <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-                <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><Eye className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Preview</span></div>
-                <CardContent className="p-6"><div className="prose dark:prose-invert max-w-none p-4 bg-muted/30 rounded-2xl overflow-auto min-h-[500px]"><div dangerouslySetInnerHTML={{ __html: html }} /></div></CardContent>
-              </Card>
-            )}
+      <ToolPanel
+        title={
+          <div className="flex items-center gap-0.5 -ml-1">
+            {ACTIONS.map((a) => (
+              <Button key={a.label} variant="ghost" size="icon-sm" onClick={() => apply(a)} title={`${a.label}${a.key ? ` (Ctrl/⌘+${a.key.toUpperCase()})` : ""}`} aria-label={a.label} disabled={view === "preview"}>
+                <a.icon />
+              </Button>
+            ))}
           </div>
+        }
+        actions={
+          <>
+            <StatusBadge className="hidden md:inline-flex">{words} words</StatusBadge>
+            <Segmented size="sm" value={view} onChange={setView} options={[{ value: "write", label: "Write" }, { value: "split", label: "Split" }, { value: "preview", label: "Preview" }]} />
+            <CopyButton text={text} iconOnly />
+            <DownloadButton content={text} filename="document.md" mime="text/markdown" iconOnly />
+            <DownloadButton content={htmlDoc} filename="document.html" mime="text/html" label="HTML" />
+            <ClearButton onClick={() => setText("")} iconOnly disabled={!text} />
+          </>
+        }
+      >
+        <div className={cn("grid min-h-[560px]", view === "split" && "md:grid-cols-2 md:divide-x divide-border")}>
+          {view !== "preview" && (
+            <textarea
+              ref={ta}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={onKey}
+              spellCheck
+              aria-label="Markdown"
+              placeholder="Start writing Markdown…"
+              className="w-full h-full min-h-[560px] resize-none bg-transparent p-4 font-mono text-[13.5px] leading-relaxed outline-none"
+            />
+          )}
+          {view !== "write" && <div className="md-preview p-5 overflow-auto max-h-[75vh]" dangerouslySetInnerHTML={{ __html: html }} />}
         </div>
-
-        <div className="lg:col-span-4 space-y-6 sticky top-24">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/30 backdrop-blur-sm rounded-3xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-border/40 bg-muted/30 flex items-center gap-2"><LayoutTemplate className="w-4 h-4 text-primary" /><span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">View Mode</span></div>
-            <CardContent className="p-8 space-y-4">
-              <div className="bg-muted/30 p-1.5 rounded-xl flex items-center gap-1.5 border border-border/50">
-                <button onClick={() => setViewMode('split')} className={cn("flex-1 py-2.5 px-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all", viewMode === 'split' ? "bg-primary text-primary-foreground shadow-md" : "text-muted-foreground hover:text-foreground hover:bg-muted")}>Split</button>
-                <button onClick={() => setViewMode('edit')} className={cn("flex-1 py-2.5 px-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all", viewMode === 'edit' ? "bg-primary text-primary-foreground shadow-md" : "text-muted-foreground hover:text-foreground hover:bg-muted")}>Edit</button>
-                <button onClick={() => setViewMode('preview')} className={cn("flex-1 py-2.5 px-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all", viewMode === 'preview' ? "bg-primary text-primary-foreground shadow-md" : "text-muted-foreground hover:text-foreground hover:bg-muted")}>Preview</button>
-              </div>
-              <Button onClick={copyToClipboard} className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]">{copied ? <CheckCircle2 className="w-5 h-5 mr-2" /> : <Copy className="w-5 h-5 mr-2" />}{copied ? "Copied!" : "Copy Markdown"}</Button>
-              <Button onClick={downloadMarkdown} variant="outline" className="w-full h-12 rounded-xl border-border/50 font-bold text-muted-foreground"><Download className="w-4 h-4 mr-2" /> Download .md</Button>
-              <Button onClick={() => fileInputRef.current?.click()} variant="outline" className="w-full h-12 rounded-xl border-border/50 font-bold text-muted-foreground"><FileText className="w-4 h-4 mr-2" /> Upload .md</Button>
-              <input type="file" accept=".md,.markdown" ref={fileInputRef} onChange={handleFileSelect} className="hidden" />
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      </ToolPanel>
     </ToolLayout>
   );
 }
