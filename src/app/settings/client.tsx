@@ -3,7 +3,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
-import { Check, Download, Monitor, Moon, Sun, Trash2, Upload } from "lucide-react";
+import { Check, Download, Heart, Monitor, Moon, Sun, Trash2, Upload } from "lucide-react";
 import { GithubIcon as Github } from "@/components/github-icon";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -273,6 +273,13 @@ export function SettingsClient() {
               <Button variant="outline" asChild>
                 <a href="https://github.com/faheemjafar/everydaytab" target="_blank" rel="noopener noreferrer">
                   <Github /> GitHub
+                </a>
+              </Button>
+            </Row>
+            <Row label="Sponsor the project" description="Built solo on nights and weekends. Sponsorship keeps it free and ad-free; companies can expense it.">
+              <Button variant="outline" asChild className="text-pink-600 dark:text-pink-400 border-pink-500/30 hover:bg-pink-500/10">
+                <a href="https://github.com/sponsors/faheemjafar" target="_blank" rel="noopener noreferrer">
+                  <Heart className="fill-current" /> GitHub Sponsors
                 </a>
               </Button>
             </Row>

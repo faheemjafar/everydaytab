@@ -1,6 +1,4 @@
-# GitHub will render a "Sponsor" button on the repo using these links.
+# Renders the "Sponsor" button on the repository.
 # Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
 
-ko_fi: faheemj
-custom:
-  - "https://everydaytab.com"
+github: faheemjafar

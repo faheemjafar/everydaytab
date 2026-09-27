@@ -7,6 +7,7 @@
 [![Next.js](https://img.shields.io/badge/Built%20with-Next.js%2016-black?logo=next.js)](https://nextjs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-v4-06B6D4?logo=tailwindcss)](https://tailwindcss.com)
+[![GitHub Sponsors](https://img.shields.io/badge/Sponsor-%E2%9D%A4-EA4AAA?logo=githubsponsors)](https://github.com/sponsors/faheemjafar)
 
 **Live:** [everydaytab.com](https://everydaytab.com) · Built and maintained solo by [@faheemjafar](https://github.com/faheemjafar).
 
@@ -125,8 +126,9 @@ Conventions for the UI system are in [`AGENTS.md`](AGENTS.md).
 
 ## Support the project
 
-EverydayTab is free, ad-free and 100% client-side. If it saves you time:
+EverydayTab is free, ad-free and 100% client-side, built solo on nights and weekends. If it saves you time:
 
+- 💖 **[Sponsor on GitHub](https://github.com/sponsors/faheemjafar)** — recurring or one-off, companies can expense it
 - ⭐ Star the repo
 - 🐛 [Report a bug or request a tool](https://github.com/faheemjafar/everydaytab/issues)
 - 📣 Share it with someone who'd find it useful
