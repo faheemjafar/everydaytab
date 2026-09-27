@@ -1,293 +1,84 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
+import { Minimize2 } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import {
-  Minimize2,
-  Upload,
-  Download,
-  Music,
-  Trash2,
-  CheckCircle2,
-  AlertCircle,
-  RotateCcw,
-  Zap,
-  ShieldCheck,
-  RefreshCw,
-} from "lucide-react";
-import { useFFmpeg } from "@/hooks/use-ffmpeg";
-import { formatFileSize } from "@/lib/audio-utils";
-import { cn } from "@/lib/utils";
+import { ChoiceGrid, Field, MediaTool, Segmented, formatBytes, stem, useMediaFile } from "@/components/tool";
 
-const levels = [
-  { value: "high", label: "High", desc: "Small file, lower quality", bitrate: "96k" },
-  { value: "medium", label: "Balanced", desc: "Good compromise", bitrate: "128k" },
-  { value: "low", label: "Light", desc: "Minimal compression", bitrate: "160k" },
-];
+const LEVELS = {
+  high: { kbps: 192, label: "High", hint: "Music, near original" },
+  medium: { kbps: 128, label: "Standard", hint: "Music, good" },
+  low: { kbps: 64, label: "Small", hint: "Speech, podcasts" },
+  tiny: { kbps: 32, label: "Tiny", hint: "Voice memos" },
+} as const;
+type Level = keyof typeof LEVELS;
+type Codec = "mp3" | "m4a" | "opus";
+
+const CODEC = {
+  mp3: { mime: "audio/mpeg", args: (k: number) => ["-c:a", "libmp3lame", "-b:a", `${k}k`] },
+  m4a: { mime: "audio/mp4", args: (k: number) => ["-c:a", "aac", "-b:a", `${k}k`] },
+  opus: { mime: "audio/ogg", args: (k: number) => ["-c:a", "libopus", "-b:a", `${k}k`, "-compression_level", "4"] },
+};
 
 export default function AudioCompressor() {
-  const [file, setFile] = useState<File | null>(null);
-  const [level, setLevel] = useState("medium");
-  const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{
-    url: string;
-    originalSize: number;
-    newSize: number;
-    time: number;
-  } | null>(null);
+  const [level, setLevel] = useState<Level>("medium");
+  const [codec, setCodec] = useState<Codec>("mp3");
+  const [mono, setMono] = useState(false);
+  const media = useMediaFile("audio");
+  const kbps = LEVELS[level].kbps;
+  const dur = media.info?.duration ?? NaN;
 
-  const { ffmpeg, loaded, fetchFile, setOnProgress } = useFFmpeg();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const reset = () => {
-    setFile(null);
-    setResult(null);
-    setError(null);
-    setProgress(0);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+  const compress = () => {
+    if (!media.file) return;
+    const out = `out.${codec}`;
+    // Lower sample rate for very low bitrates keeps speech clearer.
+    // Opus must be 48/24 kHz (FFmpeg.wasm crashes otherwise); others drop rate at low bitrates for clearer speech.
+    const ar = codec === "opus" ? ["-ar", kbps <= 32 ? "24000" : "48000"] : kbps <= 32 ? ["-ar", "22050"] : kbps <= 64 ? ["-ar", "32000"] : [];
+    media.run({
+      args: (input) => ["-i", input, "-vn", ...(mono ? ["-ac", "1"] : []), ...ar, ...CODEC[codec].args(kbps), out],
+      output: out,
+      mime: CODEC[codec].mime,
+      filename: `${stem(media.file)}-${kbps}k.${codec}`,
+    });
   };
-
-  const handleFile = (f: File | null) => {
-    if (!f) return;
-    if (!f.type.startsWith("audio/")) {
-      setError("Please upload a valid audio file.");
-      return;
-    }
-    setFile(f);
-    setError(null);
-    setResult(null);
-  };
-
-  const handleCompress = async () => {
-    if (!file || !ffmpeg || !loaded) return;
-    setProcessing(true);
-    setProgress(0);
-    setError(null);
-    setResult(null);
-
-    const start = performance.now();
-    const selected = levels.find((l) => l.value === level);
-    const bitrate = selected?.bitrate || "128k";
-
-    try {
-      const ext = file.name.substring(file.name.lastIndexOf(".")) || ".mp3";
-      const inputName = "input" + ext;
-      const outputName = "compressed.mp3";
-
-      await ffmpeg.writeFile(inputName, await fetchFile(file));
-
-      setOnProgress((p) => setProgress(p));
-      await ffmpeg.exec([
-        "-i",
-        inputName,
-        "-c:a",
-        "libmp3lame",
-        "-b:a",
-        bitrate,
-        "-ar",
-        "44100",
-        outputName,
-      ]);
-
-      const data = await ffmpeg.readFile(outputName);
-      const blob = new Blob([new Uint8Array(data as unknown as ArrayBuffer)], {
-        type: "audio/mpeg",
-      });
-      const url = URL.createObjectURL(blob);
-
-      setResult({
-        url,
-        originalSize: file.size,
-        newSize: blob.size,
-        time: (performance.now() - start) / 1000,
-      });
-
-      await ffmpeg.deleteFile(inputName);
-      await ffmpeg.deleteFile(outputName);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Compression failed");
-    } finally {
-      setProcessing(false);
-      setOnProgress(null);
-    }
-  };
-
-  const savings = result && result.originalSize > 0
-    ? Math.round((1 - result.newSize / result.originalSize) * 100)
-    : 0;
 
   return (
     <ToolLayout toolId="audio-compressor">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-4 order-last space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-4">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">
-                  Compression Level
-                </Label>
-                <div className="grid grid-cols-1 gap-2">
-                  {levels.map((l) => (
-                    <button
-                      key={l.value}
-                      onClick={() => setLevel(l.value)}
-                      className={cn(
-                        "flex items-center justify-between p-3 rounded-xl border-2 transition-all",
-                        level === l.value
-                          ? "bg-primary border-primary text-primary-foreground shadow-md"
-                          : "bg-card border-border hover:border-primary/20 text-foreground"
-                      )}
-                    >
-                      <span className="text-xs font-black uppercase tracking-tight">{l.label}</span>
-                      <span className="text-[10px] font-bold opacity-70">{l.desc}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-border/40 space-y-3">
-                <Button
-                  onClick={handleCompress}
-                  disabled={!file || processing || !loaded}
-                  className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-                >
-                  <Minimize2 className="w-5 h-5 mr-2" />
-                  Compress Audio
-                </Button>
-                <Button variant="ghost" onClick={reset} className="w-full rounded-xl font-bold h-10">
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Reset
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">How It Works</h3>
-            </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              We re-encode your audio to MP3 at a lower bitrate. Lossless sources (WAV/FLAC) compress best.
-            </p>
-          </div>
-        </div>
-
-        <div className="lg:col-span-8 order-first flex flex-col gap-6">
-          {!file && !result && (
-            <Card
-              className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[3rem] overflow-hidden min-h-[320px] flex flex-col items-center justify-center gap-6 cursor-pointer transition-all hover:border-primary/30 hover:shadow-primary/10"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/*"
-                className="hidden"
-                onChange={(e) => handleFile(e.target.files?.[0] || null)}
+      <MediaTool
+        media={media}
+        options={
+          <>
+            <Field label="Target quality">
+              <ChoiceGrid cols={2} value={level} onChange={setLevel} options={(Object.keys(LEVELS) as Level[]).map((k) => ({ value: k, label: `${LEVELS[k].label} · ${LEVELS[k].kbps}k`, hint: LEVELS[k].hint }))} />
+            </Field>
+            <Field label="Codec" hint={codec === "opus" ? "Best quality per kbps; plays in browsers, Android, VLC." : codec === "m4a" ? "AAC — great on Apple devices." : "Plays everywhere."}>
+              <Segmented
+                size="sm"
+                value={codec}
+                onChange={setCodec}
+                options={[
+                  { value: "mp3", label: "MP3" },
+                  { value: "m4a", label: "AAC" },
+                  { value: "opus", label: "Opus" },
+                ]}
               />
-              <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center">
-                <Upload className="w-8 h-8 text-primary" />
-              </div>
-              <div className="text-center space-y-2">
-                <p className="font-bold text-lg">Drop audio file here</p>
-                <p className="text-sm text-muted-foreground">or click to browse</p>
-              </div>
-            </Card>
-          )}
-
-          {file && !result && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-8 flex items-center gap-5">
-                <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                  <Music className="w-7 h-7 text-primary" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm truncate">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatFileSize(file.size)} · {file.type.split("/")[1]?.toUpperCase() || "AUDIO"}
-                  </p>
-                </div>
-                {!processing && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={reset}
-                    className="rounded-xl h-10 w-10 text-destructive hover:bg-destructive/10"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {processing && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-12 flex flex-col items-center gap-6">
-                <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                <div className="text-center space-y-2">
-                  <p className="font-bold text-lg">Compressing...</p>
-                  <p className="text-sm text-muted-foreground">{progress}% complete</p>
-                </div>
-                <div className="w-full max-w-md h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all duration-300"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {error && (
-            <div className="p-5 rounded-2xl bg-destructive/10 border border-destructive/20 text-destructive text-sm font-bold flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 shrink-0" />
-              {error}
-            </div>
-          )}
-
-          {result && (
-            <Card className="border-emerald-500/30 shadow-2xl shadow-emerald-500/10 bg-gradient-to-br from-emerald-500/10 to-primary/5 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-10 flex flex-col items-center gap-8">
-                <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                  <CheckCircle2 className="w-10 h-10 text-emerald-500" />
-                </div>
-                <div className="text-center space-y-1">
-                  <p className="text-2xl font-black">Compressed!</p>
-                  <p className="text-sm text-muted-foreground">
-                    Saved {savings}% · {formatFileSize(result.originalSize)} → {formatFileSize(result.newSize)}
-                  </p>
-                </div>
-                <div className="flex gap-3 w-full max-w-md">
-                  <Button
-                    onClick={() => {
-                      const a = document.createElement("a");
-                      a.href = result.url;
-                      const base = file?.name.split(".")[0] || "audio";
-                      a.download = `${base}_compressed.mp3`;
-                      a.click();
-                    }}
-                    className="flex-1 h-14 rounded-2xl text-lg font-bold bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 transition-all"
-                  >
-                    <Download className="w-5 h-5 mr-2" />
-                    Download
-                  </Button>
-                  <Button variant="outline" onClick={reset} className="h-14 rounded-2xl font-bold px-6">
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    New
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
+            </Field>
+            <Field label="Channels">
+              <Segmented
+                size="sm"
+                value={mono ? "mono" : "stereo"}
+                onChange={(v) => setMono(v === "mono")}
+                options={[
+                  { value: "stereo", label: "Keep" },
+                  { value: "mono", label: "Mono (halves size)" },
+                ]}
+              />
+            </Field>
+            {Number.isFinite(dur) && <p className="text-[11px] text-muted-foreground tabular-nums">Estimated output ≈ {formatBytes((kbps * 1000 * dur) / 8)}</p>}
+          </>
+        }
+        action={{ label: "Compress audio", busyLabel: "Compressing", icon: <Minimize2 />, onClick: compress }}
+      />
     </ToolLayout>
   );
 }

@@ -45,6 +45,7 @@ export {
 export { SliderField, ColorField, CodeOutput, PreviewStage, hexToRgbTuple, rgba } from "./generator";
 export {
   MediaTool,
+  AudioPlayer,
   useMediaFile,
   TimeRange,
   formatDuration,
@@ -56,10 +57,17 @@ export {
   EVEN_DIMS,
   FASTSTART,
   VIDEO_CONTAINERS,
+  AUDIO_FORMATS,
+  audioFormatFor,
+  audioOutput,
+  AudioFormatField,
+  type AudioFormat,
   type VideoContainer,
   type MediaFileState,
   type MediaResult,
   type FFmpegJob,
+  type ProcessContext,
   type MediaKind,
 } from "./media";
 export { CropBox, initialCrop, fitCrop, type CropRect } from "./crop-box";
+export { Waveform } from "./waveform";

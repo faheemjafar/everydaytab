@@ -22,6 +22,17 @@ let status: Status = "idle";
 let lastError: string | null = null;
 let progressCb: ((pct: number) => void) | null = null;
 const logTail: string[] = [];
+let capture: string[] | null = null;
+
+/** Collects every FFmpeg log line until stopLogCapture() (e.g. to parse silencedetect/volumedetect). */
+export function startLogCapture() {
+  capture = [];
+}
+export function stopLogCapture(): string[] {
+  const out = capture ?? [];
+  capture = null;
+  return out;
+}
 const listeners = new Set<() => void>();
 const notify = () => listeners.forEach((l) => l());
 
@@ -40,6 +51,7 @@ function loadFFmpeg(): Promise<FFmpeg> {
     const ff = new FFmpeg();
     ff.on("log", ({ message }) => {
       // Keep a short tail for error messages instead of spamming the console.
+      capture?.push(message);
       logTail.push(message);
       if (logTail.length > 40) logTail.shift();
     });

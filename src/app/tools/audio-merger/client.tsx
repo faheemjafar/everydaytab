@@ -1,357 +1,244 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Download, GitMerge, Music, RefreshCw, Trash2 } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
+import { useFFmpeg, ffmpegLogTail } from "@/hooks/use-ffmpeg";
 import {
-  GitMerge,
-  Upload,
-  Download,
-  Music,
-  Trash2,
-  CheckCircle2,
-  AlertCircle,
-  RotateCcw,
-  Disc,
-  RefreshCw,
-  GripVertical,
-  Plus,
-} from "lucide-react";
-import { useFFmpeg } from "@/hooks/use-ffmpeg";
-import { formatFileSize, mimeMap, codecMap } from "@/lib/audio-utils";
-import { cn } from "@/lib/utils";
+  AUDIO_FORMATS,
+  AudioFormatField,
+  Field,
+  FileDropzone,
+  FileList,
+  FileListItem,
+  OptionsLayout,
+  PrivacyNote,
+  Segmented,
+  SliderField,
+  StatusBadge,
+  ToolAlert,
+  ToolPanel,
+  extOf,
+  formatBytes,
+  formatDuration,
+  type AudioFormat,
+} from "@/components/tool";
 
-const formats = [
-  { value: "mp3", label: "MP3", desc: "Universal" },
-  { value: "wav", label: "WAV", desc: "Lossless" },
-  { value: "aac", label: "AAC", desc: "Apple" },
-  { value: "flac", label: "FLAC", desc: "Studio" },
-  { value: "ogg", label: "OGG", desc: "Open Source" },
-];
+interface Track {
+  id: string;
+  file: File;
+  duration: number;
+}
+type Join = "direct" | "gap" | "crossfade";
+
+const makeId = () => Math.random().toString(36).slice(2, 9);
+
+function probe(file: File): Promise<number> {
+  return new Promise((res) => {
+    const a = document.createElement("audio");
+    const u = URL.createObjectURL(file);
+    a.preload = "metadata";
+    a.onloadedmetadata = () => {
+      res(a.duration);
+      URL.revokeObjectURL(u);
+    };
+    a.onerror = () => {
+      res(NaN);
+      URL.revokeObjectURL(u);
+    };
+    a.src = u;
+  });
+}
 
 export default function AudioMerger() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [format, setFormat] = useState("mp3");
-  const [processing, setProcessing] = useState(false);
+  const engine = useFFmpeg({ lazy: true });
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [format, setFormat] = useState<AudioFormat>("mp3");
+  const [join, setJoin] = useState<Join>("direct");
+  const [gap, setGap] = useState(1);
+  const [xfade, setXfade] = useState(2);
+  const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{
-    url: string;
-    size: number;
-    time: number;
-  } | null>(null);
+  const [result, setResult] = useState<{ url: string; blob: Blob } | null>(null);
+  const urlRef = useRef<string | null>(null);
+  useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
 
-  const { ffmpeg, loaded, fetchFile, setOnProgress } = useFFmpeg();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const add = async (files: File[]) => {
+    const ok = files.filter((f) => f.type.startsWith("audio/") || /\.(flac|m4a|opus|aac|wav|ogg|mp3)$/i.test(f.name));
+    if (!ok.length) return setError("Please choose audio files.");
+    setError(null);
+    engine.load().catch(() => {});
+    const probed = await Promise.all(ok.map(async (file) => ({ id: makeId(), file, duration: await probe(file) })));
+    setTracks((t) => [...t, ...probed]);
+  };
 
-  const reset = () => {
-    setFiles([]);
-    setResult(null);
+  const move = (i: number, d: -1 | 1) =>
+    setTracks((t) => {
+      const j = i + d;
+      if (j < 0 || j >= t.length) return t;
+      const n = [...t];
+      [n[i], n[j]] = [n[j], n[i]];
+      return n;
+    });
+
+  const total = tracks.reduce((s, t) => s + (Number.isFinite(t.duration) ? t.duration : 0), 0) + (join === "gap" ? gap * (tracks.length - 1) : join === "crossfade" ? -xfade * (tracks.length - 1) : 0);
+
+  const merge = async () => {
+    if (tracks.length < 2) return;
+    setBusy(true);
     setError(null);
     setProgress(0);
-  };
-
-  const handleFiles = (incoming: FileList | null) => {
-    if (!incoming) return;
-    const valid = Array.from(incoming).filter((f) => f.type.startsWith("audio/"));
-    if (valid.length < incoming.length) {
-      setError("Some non-audio files were skipped.");
-    }
-    if (valid.length > 0) {
-      setFiles((prev) => [...prev, ...valid]);
-      setResult(null);
-    }
-  };
-
-  const removeFile = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     setResult(null);
-  };
-
-  const moveFile = (index: number, direction: -1 | 1) => {
-    const newIndex = index + direction;
-    if (newIndex < 0 || newIndex >= files.length) return;
-    const newFiles = [...files];
-    [newFiles[index], newFiles[newIndex]] = [newFiles[newIndex], newFiles[index]];
-    setFiles(newFiles);
-  };
-
-  const handleMerge = async () => {
-    if (files.length < 2 || !ffmpeg || !loaded) {
-      setError("Please add at least 2 audio files.");
-      return;
-    }
-    setProcessing(true);
-    setProgress(0);
-    setError(null);
-    setResult(null);
-
-    const start = performance.now();
+    const names = tracks.map((t, i) => `in${i}.${extOf(t.file.name, "mp3")}`);
+    const written: string[] = [];
+    let ff: Awaited<ReturnType<typeof engine.load>> | null = null;
     try {
-      const inputNames: string[] = [];
-      for (let i = 0; i < files.length; i++) {
-        const ext = files[i].name.substring(files[i].name.lastIndexOf(".")) || ".mp3";
-        const name = `input_${i}${ext}`;
-        await ffmpeg.writeFile(name, await fetchFile(files[i]));
-        inputNames.push(name);
+      ff = await engine.load();
+      for (let i = 0; i < tracks.length; i++) {
+        await ff.writeFile(names[i], await engine.fetchFile(tracks[i].file));
+        written.push(names[i]);
       }
-
-      const outputName = `merged.${format}`;
-      const inputArgs: string[] = [];
-      inputNames.forEach((n) => {
-        inputArgs.push("-i", n);
-      });
-
-      const codecArgs = codecMap[format] || codecMap["mp3"];
-      const filterComplex =
-        inputNames.map((_, i) => `[${i}:a]`).join("") +
-        `concat=n=${inputNames.length}:v=0:a=1[out]`;
-
-      setOnProgress((p) => setProgress(p));
-      await ffmpeg.exec([
-        ...inputArgs,
-        "-filter_complex",
-        filterComplex,
-        "-map",
-        "[out]",
-        ...codecArgs,
-        outputName,
-      ]);
-
-      const data = await ffmpeg.readFile(outputName);
-      const blob = new Blob([new Uint8Array(data as unknown as ArrayBuffer)], {
-        type: mimeMap[format] || "audio/mpeg",
-      });
-      const url = URL.createObjectURL(blob);
-
-      setResult({ url, size: blob.size, time: (performance.now() - start) / 1000 });
-
-      for (const n of inputNames) await ffmpeg.deleteFile(n);
-      await ffmpeg.deleteFile(outputName);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Merge failed");
+      // Normalise every input to 44.1 kHz stereo so concat/acrossfade accept them.
+      const norm = tracks.map((_, i) => `[${i}:a:0]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`);
+      let graph: string;
+      if (join === "crossfade") {
+        const steps: string[] = [];
+        let prev = "a0";
+        for (let i = 1; i < tracks.length; i++) {
+          const out = i === tracks.length - 1 ? "out" : `x${i}`;
+          steps.push(`[${prev}][a${i}]acrossfade=d=${xfade}:c1=qsin:c2=qsin[${out}]`);
+          prev = out;
+        }
+        graph = [...norm, ...steps].join(";");
+      } else if (join === "gap") {
+        const sil = tracks.slice(1).map((_, i) => `anullsrc=r=44100:cl=stereo,atrim=duration=${gap}[s${i}]`);
+        const seq = tracks.map((_, i) => (i ? `[s${i - 1}][a${i}]` : "[a0]")).join("");
+        graph = [...norm, ...sil, `${seq}concat=n=${tracks.length * 2 - 1}:v=0:a=1[out]`].join(";");
+      } else {
+        graph = [...norm, `${tracks.map((_, i) => `[a${i}]`).join("")}concat=n=${tracks.length}:v=0:a=1[out]`].join(";");
+      }
+      const f = AUDIO_FORMATS[format];
+      const out = `merged.${format}`;
+      engine.setOnProgress(setProgress);
+      const code = await ff.exec([...names.flatMap((n) => ["-i", n]), "-filter_complex", graph, "-map", "[out]", ...f.args(192), out]);
+      if (code !== 0) throw new Error(`FFmpeg exited with code ${code}.\n${ffmpegLogTail(6)}`);
+      const data = (await ff.readFile(out)) as Uint8Array;
+      written.push(out);
+      const blob = new Blob([data.slice()], { type: f.mime });
+      urlRef.current = URL.createObjectURL(blob);
+      setResult({ url: urlRef.current, blob });
+    } catch (e) {
+      setError((e as Error).message || "Merging failed.");
     } finally {
-      setProcessing(false);
-      setOnProgress(null);
+      engine.setOnProgress(null);
+      setBusy(false);
+      if (ff) for (const n of written) await ff.deleteFile(n).catch(() => {});
     }
   };
 
-  const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+  if (!tracks.length) {
+    return (
+      <ToolLayout toolId="audio-merger">
+        <div className="space-y-3">
+          <FileDropzone onFiles={add} accept="audio/*" multiple icon={<Music className="w-5 h-5" />} title="Drop two or more audio files" hint="Any mix of MP3, WAV, M4A, FLAC, OGG — joined in the order you arrange." className="min-h-72" />
+          {error && <ToolAlert tone="error">{error}</ToolAlert>}
+        </div>
+      </ToolLayout>
+    );
+  }
+
+  const shortest = Math.min(...tracks.map((t) => t.duration).filter(Number.isFinite));
+
+  const options = (
+    <ToolPanel
+      title="Options"
+      bodyClassName="p-3.5 space-y-4"
+      footer={
+        <div className="w-full space-y-2">
+          <Button size="lg" onClick={merge} disabled={busy || tracks.length < 2} className="w-full">
+            {busy ? <RefreshCw className="animate-spin" /> : <GitMerge />}
+            {busy ? (progress ? `Merging ${progress}%` : engine.loading ? "Loading engine…" : "Merging…") : `Merge ${tracks.length} files`}
+          </Button>
+          {engine.loading ? <StatusBadge tone="info"><RefreshCw className="w-3 h-3 animate-spin" /> Loading engine (first time ≈30 MB)</StatusBadge> : <PrivacyNote>Processed locally.</PrivacyNote>}
+        </div>
+      }
+    >
+      <Field label="Between tracks">
+        <Segmented
+          value={join}
+          onChange={setJoin}
+          options={[
+            { value: "direct", label: "Back to back" },
+            { value: "gap", label: "Silence" },
+            { value: "crossfade", label: "Crossfade" },
+          ]}
+        />
+      </Field>
+      {join === "gap" && <SliderField label="Gap" value={gap} onChange={setGap} min={0.5} max={10} step={0.5} format={(v) => `${v}s`} />}
+      {join === "crossfade" && <SliderField label="Crossfade" value={xfade} onChange={setXfade} min={0.5} max={Math.max(0.5, Math.min(10, (shortest || 20) / 2))} step={0.5} format={(v) => `${v}s`} />}
+      <AudioFormatField value={format} onChange={setFormat} />
+    </ToolPanel>
+  );
 
   return (
     <ToolLayout toolId="audio-merger">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-4 order-last space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-4">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">
-                  Output Format
-                </Label>
-                <div className="grid grid-cols-1 gap-2">
-                  {formats.map((f) => (
-                    <button
-                      key={f.value}
-                      onClick={() => setFormat(f.value)}
-                      className={cn(
-                        "flex items-center justify-between p-3 rounded-xl border-2 transition-all",
-                        format === f.value
-                          ? "bg-primary border-primary text-primary-foreground shadow-md"
-                          : "bg-card border-border hover:border-primary/20 text-foreground"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Disc className="w-4 h-4" />
-                        <span className="text-xs font-black uppercase tracking-tight">{f.label}</span>
-                      </div>
-                      <span className="text-[10px] font-bold opacity-70">{f.desc}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-border/40 space-y-3">
-                <Button
-                  onClick={handleMerge}
-                  disabled={files.length < 2 || processing || !loaded}
-                  className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-                >
-                  <GitMerge className="w-5 h-5 mr-2" />
-                  Merge {files.length} Tracks
-                </Button>
-                <Button variant="ghost" onClick={reset} className="w-full rounded-xl font-bold h-10">
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Clear All
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="lg:col-span-8 order-first flex flex-col gap-6">
-          {files.length === 0 && !result && (
-            <Card
-              className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[3rem] overflow-hidden min-h-[320px] flex flex-col items-center justify-center gap-6 cursor-pointer transition-all hover:border-primary/30 hover:shadow-primary/10"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/*"
-                multiple
-                className="hidden"
-                onChange={(e) => handleFiles(e.target.files)}
+      <OptionsLayout options={options}>
+        <ToolPanel
+          title={`${tracks.length} tracks · ${formatDuration(Math.max(0, total))}`}
+          actions={
+            <Button variant="ghost" size="sm" onClick={() => setTracks([])} disabled={busy} className="text-muted-foreground hover:text-destructive">
+              <Trash2 /> Clear
+            </Button>
+          }
+        >
+          <FileList className="border-0 rounded-none">
+            {tracks.map((t, i) => (
+              <FileListItem
+                key={t.id}
+                index={i}
+                name={t.file.name}
+                meta={[Number.isFinite(t.duration) ? formatDuration(t.duration) : null, formatBytes(t.file.size)].filter(Boolean).join(" · ")}
+                icon={<Music className="w-4 h-4" />}
+                onMoveUp={() => move(i, -1)}
+                onMoveDown={() => move(i, 1)}
+                canMoveUp={i > 0}
+                canMoveDown={i < tracks.length - 1}
+                onRemove={() => setTracks((x) => x.filter((y) => y.id !== t.id))}
               />
-              <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center">
-                <Upload className="w-8 h-8 text-primary" />
-              </div>
-              <div className="text-center space-y-2">
-                <p className="font-bold text-lg">Drop audio files here</p>
-                <p className="text-sm text-muted-foreground">or click to browse — add multiple tracks</p>
-              </div>
-            </Card>
-          )}
+            ))}
+          </FileList>
+          <div className="p-2 border-t border-border">
+            <FileDropzone onFiles={add} accept="audio/*" multiple size="sm" title="Add more tracks" />
+          </div>
+        </ToolPanel>
 
-          {error && (
-            <div className="p-5 rounded-2xl bg-destructive/10 border border-destructive/20 text-destructive text-sm font-bold flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 shrink-0" />
-              {error}
+        {result && (
+          <ToolPanel
+            title="Merged"
+            actions={<StatusBadge>{formatBytes(result.blob.size)}</StatusBadge>}
+            footer={
+              <>
+                <span className="flex-1" />
+                <Button variant="outline" onClick={() => { const a = document.createElement("a"); a.href = result.url; a.download = `merged.${format}`; a.click(); }}>
+                  <Download /> Download {AUDIO_FORMATS[format].label}
+                </Button>
+              </>
+            }
+          >
+            <div className="p-4">
+              <audio src={result.url} controls className="w-full" />
             </div>
-          )}
-
-          {files.length > 0 && !result && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between px-2">
-                <p className="text-xs font-black uppercase tracking-widest text-muted-foreground">Your Tracks</p>
-                <span className="text-xs font-black text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                  {formatFileSize(totalSize)} Total
-                </span>
-              </div>
-
-              <div className="space-y-2">
-                {files.map((f, i) => (
-                  <Card
-                    key={`${f.name}-${i}`}
-                    className="border-border/40 bg-card/40 backdrop-blur-sm rounded-2xl overflow-hidden"
-                  >
-                    <CardContent className="p-4 flex items-center gap-3">
-                      <GripVertical className="w-4 h-4 text-muted-foreground shrink-0" />
-                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-black text-primary shrink-0">
-                        {i + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold truncate">{f.name}</p>
-                        <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
-                          {formatFileSize(f.size)}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={i === 0}
-                          onClick={() => moveFile(i, -1)}
-                          className="h-8 w-8 p-0 rounded-lg"
-                        >
-                          ↑
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={i === files.length - 1}
-                          onClick={() => moveFile(i, 1)}
-                          className="h-8 w-8 p-0 rounded-lg"
-                        >
-                          ↓
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeFile(i)}
-                          className="h-8 w-8 rounded-lg text-destructive hover:bg-destructive/10"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-
-              <Button
-                variant="outline"
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full h-12 rounded-2xl border-dashed border-2 font-bold text-xs uppercase tracking-wider"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add More Tracks
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/*"
-                multiple
-                className="hidden"
-                onChange={(e) => handleFiles(e.target.files)}
-              />
-            </div>
-          )}
-
-          {processing && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-12 flex flex-col items-center gap-6">
-                <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                <div className="text-center space-y-2">
-                  <p className="font-bold text-lg">Merging audio...</p>
-                  <p className="text-sm text-muted-foreground">{progress}% complete</p>
-                </div>
-                <div className="w-full max-w-md h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all duration-300"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {result && (
-            <Card className="border-emerald-500/30 shadow-2xl shadow-emerald-500/10 bg-gradient-to-br from-emerald-500/10 to-primary/5 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-10 flex flex-col items-center gap-8">
-                <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                  <CheckCircle2 className="w-10 h-10 text-emerald-500" />
-                </div>
-                <div className="text-center space-y-1">
-                  <p className="text-2xl font-black">Merged!</p>
-                  <p className="text-sm text-muted-foreground">
-                    {files.length} tracks → {format.toUpperCase()} · {result.time.toFixed(1)}s
-                  </p>
-                </div>
-                <div className="flex gap-3 w-full max-w-md">
-                  <Button
-                    onClick={() => {
-                      const a = document.createElement("a");
-                      a.href = result.url;
-                      a.download = `merged_audio.${format}`;
-                      a.click();
-                    }}
-                    className="flex-1 h-14 rounded-2xl text-lg font-bold bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 transition-all"
-                  >
-                    <Download className="w-5 h-5 mr-2" />
-                    Download
-                  </Button>
-                  <Button variant="outline" onClick={reset} className="h-14 rounded-2xl font-bold px-6">
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    New
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
+          </ToolPanel>
+        )}
+        {error && (
+          <ToolAlert tone="error" title="Merge failed">
+            <pre className="whitespace-pre-wrap font-mono text-[11px]">{error}</pre>
+          </ToolAlert>
+        )}
+      </OptionsLayout>
     </ToolLayout>
   );
 }

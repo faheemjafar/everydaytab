@@ -1,214 +1,57 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
+import { Mic } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import {
-  User,
-  Upload,
-  Download,
-  Music,
-  Trash2,
-  CheckCircle2,
-  AlertCircle,
-  RotateCcw,
-  RefreshCw,
-  Mic,
-} from "lucide-react";
-import { useFFmpeg } from "@/hooks/use-ffmpeg";
-import { formatFileSize } from "@/lib/audio-utils";
-import { cn } from "@/lib/utils";
+import { AudioFormatField, ChoiceGrid, Field, MediaTool, SliderField, audioFormatFor, audioOutput, useMediaFile, type AudioFormat } from "@/components/tool";
 
-const modes = [
-  { value: "karaoke", label: "Karaoke", desc: "Remove center vocals for backing track" },
-  { value: "vocal", label: "Vocal Only", desc: "Isolate center vocals (mono mix)" },
-];
+const MODES = {
+  enhance: { label: "Clean up voice", hint: "Denoise, rumble & hiss filter, level" },
+  karaoke: { label: "Remove vocals", hint: "Karaoke: cancel centre-panned voice" },
+  centre: { label: "Extract centre", hint: "Keep what's panned centre (often vocals)" },
+} as const;
+type Mode = keyof typeof MODES;
 
-export default function VoiceIsolatorClient() {
-  const [file, setFile] = useState<File | null>(null);
-  const [mode, setMode] = useState("karaoke");
-  const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{
-    url: string;
-    size: number;
-    time: number;
-  } | null>(null);
+export default function VoiceIsolator() {
+  const [mode, setMode] = useState<Mode>("enhance");
+  const [denoise, setDenoise] = useState(12);
+  const [format, setFormat] = useState<AudioFormat>("mp3");
+  const media = useMediaFile("audio", (_, f) => setFormat(audioFormatFor(f)));
 
-  const { ffmpeg, loaded, fetchFile, setOnProgress } = useFFmpeg();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const reset = () => {
-    setFile(null);
-    setResult(null);
-    setError(null);
-    setProgress(0);
-    setMode("karaoke");
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const handleFile = (f: File | null) => {
-    if (!f) return;
-    if (!f.type.startsWith("audio/")) {
-      setError("Please upload a valid audio file.");
-      return;
-    }
-    setFile(f);
-    setError(null);
-    setResult(null);
-  };
-
-  const handleProcess = async () => {
-    if (!file || !ffmpeg || !loaded) return;
-    setProcessing(true);
-    setProgress(0);
-    setError(null);
-    setResult(null);
-
-    const start = performance.now();
-    try {
-      const ext = file.name.substring(file.name.lastIndexOf(".")) || ".mp3";
-      const inputName = "input" + ext;
-      const outputName = "output" + ext;
-
-      await ffmpeg.writeFile(inputName, await fetchFile(file));
-
-      const af = mode === "karaoke"
-        ? "pan=stereo|FL=0.5*FL-0.5*FR|FR=0.5*FL-0.5*FR"
-        : "pan=mono|c0=FL+FR";
-
-      setOnProgress((p) => setProgress(p));
-      await ffmpeg.exec([
-        "-i", inputName,
-        "-af", af,
-        "-c:a", "libmp3lame",
-        "-q:a", "2",
-        "-y", outputName,
-      ]);
-
-      const data = await ffmpeg.readFile(outputName);
-      const blob = new Blob([new Uint8Array(data as unknown as ArrayBuffer)], {
-        type: file.type,
-      });
-      const url = URL.createObjectURL(blob);
-
-      setResult({ url, size: blob.size, time: (performance.now() - start) / 1000 });
-
-      await ffmpeg.deleteFile(inputName);
-      await ffmpeg.deleteFile(outputName);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Processing failed");
-    } finally {
-      setProcessing(false);
-      setOnProgress(null);
-    }
+  const apply = () => {
+    if (!media.file) return;
+    const o = audioOutput(format, media.file, mode === "karaoke" ? "instrumental" : "voice");
+    const af =
+      mode === "enhance"
+        ? // Rumble cut, FFT denoise, air cut, gentle leveller, then a limiter.
+          `highpass=f=80,afftdn=nr=${denoise}:nf=-45,lowpass=f=12000,dynaudnorm=f=250:g=15:p=0.9,alimiter=limit=0.95:level=disabled`
+        : mode === "karaoke"
+          ? "pan=stereo|c0=c0-c1|c1=c1-c0,highpass=f=40"
+          : // Mid channel (L+R) with side removed, band-limited to the vocal range.
+            "pan=mono|c0=0.5*c0+0.5*c1,highpass=f=100,lowpass=f=8000";
+    media.run({ args: (input) => ["-i", input, "-vn", "-af", af, ...o.codec, o.output], output: o.output, mime: o.mime, filename: o.filename });
   };
 
   return (
     <ToolLayout toolId="voice-isolator">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-4 order-last space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-4">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">
-                  Mode
-                </Label>
-                <div className="grid grid-cols-1 gap-2">
-                  {modes.map((m) => (
-                    <button
-                      key={m.value}
-                      onClick={() => setMode(m.value)}
-                      className={cn(
-                        "flex items-center justify-between p-3 rounded-xl border-2 transition-all",
-                        mode === m.value
-                          ? "bg-primary border-primary text-primary-foreground shadow-md"
-                          : "bg-card border-border hover:border-primary/20 text-foreground"
-                      )}
-                    >
-                      <span className="text-xs font-black uppercase tracking-tight">{m.label}</span>
-                      <span className="text-[10px] font-bold opacity-70">{m.desc}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-border/40 space-y-3">
-                <Button
-                  onClick={handleProcess}
-                  disabled={!file || processing || !loaded}
-                  className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-                >
-                  <User className="w-5 h-5 mr-2" />
-                  Isolate
-                </Button>
-                <Button variant="ghost" onClick={reset} className="w-full rounded-xl font-bold h-10">
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Reset
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Mic className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">How it works</h3>
-            </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Karaoke mode subtracts the right channel from the left, cancelling center-panned vocals. Works best on stereo tracks with centered lead vocals.
+      <MediaTool
+        media={media}
+        options={
+          <>
+            <Field label="Mode">
+              <ChoiceGrid cols={2} value={mode} onChange={setMode} options={(Object.keys(MODES) as Mode[]).map((k) => ({ value: k, label: MODES[k].label, hint: MODES[k].hint }))} />
+            </Field>
+            {mode === "enhance" && <SliderField label="Noise reduction" value={denoise} onChange={setDenoise} min={3} max={40} format={(v) => `${v} dB`} />}
+            <AudioFormatField value={format} onChange={setFormat} />
+            <p className="text-[11px] text-muted-foreground">
+              {mode === "enhance"
+                ? "Best for recordings with steady background noise (fans, hum, hiss)."
+                : "Signal-processing, not AI stem separation: works on stereo songs where the vocal is panned centre; reverb and backing vocals may remain."}
             </p>
-          </div>
-        </div>
-
-        <div className="lg:col-span-8 order-first flex flex-col gap-6">
-          {!file && !result && (
-            <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[3rem] overflow-hidden min-h-[320px] flex flex-col items-center justify-center gap-6 cursor-pointer transition-all hover:border-primary/30 hover:shadow-primary/10" onClick={() => fileInputRef.current?.click()}>
-              <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0] || null)} />
-              <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center"><Upload className="w-8 h-8 text-primary" /></div>
-              <div className="text-center space-y-2"><p className="font-bold text-lg">Drop audio file here</p><p className="text-sm text-muted-foreground">or click to browse</p></div>
-            </Card>
-          )}
-
-          {file && !result && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-8 flex items-center gap-5">
-                <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0"><Music className="w-7 h-7 text-primary" /></div>
-                <div className="flex-1 min-w-0"><p className="font-bold text-sm truncate">{file.name}</p><p className="text-xs text-muted-foreground">{formatFileSize(file.size)} · {file.type.split("/")[1]?.toUpperCase() || "AUDIO"}</p></div>
-                {!processing && <Button variant="ghost" size="icon" onClick={reset} className="rounded-xl h-10 w-10 text-destructive hover:bg-destructive/10"><Trash2 className="w-4 h-4" /></Button>}
-              </CardContent>
-            </Card>
-          )}
-
-          {processing && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-12 flex flex-col items-center gap-6">
-                <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                <div className="text-center space-y-2"><p className="font-bold text-lg">Isolating...</p><p className="text-sm text-muted-foreground">{progress}% complete</p></div>
-                <div className="w-full max-w-md h-2 bg-muted rounded-full overflow-hidden"><div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: `${progress}%` }} /></div>
-              </CardContent>
-            </Card>
-          )}
-
-          {error && <div className="p-5 rounded-2xl bg-destructive/10 border border-destructive/20 text-destructive text-sm font-bold flex items-center gap-3"><AlertCircle className="w-5 h-5 shrink-0" />{error}</div>}
-
-          {result && (
-            <Card className="border-emerald-500/30 shadow-2xl shadow-emerald-500/10 bg-gradient-to-br from-emerald-500/10 to-primary/5 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-10 flex flex-col items-center gap-8">
-                <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center"><CheckCircle2 className="w-10 h-10 text-emerald-500" /></div>
-                <div className="text-center space-y-1"><p className="text-2xl font-black">Done!</p><p className="text-sm text-muted-foreground">{formatFileSize(result.size)} · {result.time.toFixed(1)}s</p></div>
-                <div className="flex gap-3 w-full max-w-md">
-                  <Button onClick={() => { const a = document.createElement("a"); a.href = result.url; const base = file?.name.split(".")[0] || "audio"; const ext = file?.name.substring(file.name.lastIndexOf(".")) || ".mp3"; const suffix = mode === "karaoke" ? "_karaoke" : "_vocal"; a.download = `${base}${suffix}${ext}`; a.click(); }} className="flex-1 h-14 rounded-2xl text-lg font-bold bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 transition-all"><Download className="w-5 h-5 mr-2" />Download</Button>
-                  <Button variant="outline" onClick={reset} className="h-14 rounded-2xl font-bold px-6"><RefreshCw className="w-4 h-4 mr-2" />New</Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
+          </>
+        }
+        action={{ label: MODES[mode].label, busyLabel: "Processing", icon: <Mic />, onClick: apply }}
+      />
     </ToolLayout>
   );
 }

@@ -1,216 +1,54 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
+import { Sparkles } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import {
-  Sparkles,
-  Upload,
-  Download,
-  Music,
-  Trash2,
-  CheckCircle2,
-  AlertCircle,
-  RotateCcw,
-  RefreshCw,
-  Wand2,
-} from "lucide-react";
-import { useFFmpeg } from "@/hooks/use-ffmpeg";
-import { formatFileSize } from "@/lib/audio-utils";
-import { cn } from "@/lib/utils";
+import { AudioFormatField, ChoiceGrid, Field, MediaTool, SliderField, audioFormatFor, audioOutput, useMediaFile, type AudioFormat } from "@/components/tool";
 
-const effects = [
-  { value: "echo", label: "Echo", desc: "Short delay repeat", filter: "aecho=0.8:0.9:1000|1800:0.3|0.25" },
-  { value: "reverb", label: "Reverb", desc: "Room ambience", filter: "aecho=0.6:0.3:50|70:0.5|0.3" },
-  { value: "chorus", label: "Chorus", desc: "Layered voices", filter: "chorus=0.7:0.9:55:0.4:0.25:2" },
-  { value: "flanger", label: "Flanger", desc: "Sweeping effect", filter: "flanger" },
-  { value: "bassboost", label: "Bass Boost", desc: "Low-end boost", filter: "bass=g=10" },
-  { value: "trebleboost", label: "Treble Boost", desc: "High-end boost", filter: "treble=g=8" },
-];
+const EFFECTS = {
+  echo: { label: "Echo", hint: "Distinct repeats", af: (x: number) => `aecho=0.8:0.85:${Math.round(300 + x * 7)}|${Math.round(600 + x * 12)}:${(0.2 + x / 250).toFixed(2)}|${(0.15 + x / 400).toFixed(2)}` },
+  reverb: { label: "Reverb", hint: "Room / hall", af: (x: number) => `aecho=0.8:0.88:${Math.round(40 + x)}|${Math.round(60 + x * 1.3)}|${Math.round(90 + x * 1.7)}:${(0.3 + x / 400).toFixed(2)}|${(0.25 + x / 500).toFixed(2)}|${(0.2 + x / 600).toFixed(2)}` },
+  chorus: { label: "Chorus", hint: "Thicker, layered", af: (x: number) => `chorus=0.6:0.9:${Math.round(40 + x / 3)}|${Math.round(55 + x / 3)}:0.4|0.32:0.25|0.4:2|1.3` },
+  flanger: { label: "Flanger", hint: "Jet sweep", af: (x: number) => `flanger=delay=${(x / 25).toFixed(1)}:depth=${(2 + x / 20).toFixed(1)}:speed=0.5` },
+  phaser: { label: "Phaser", hint: "Swirling", af: (x: number) => `aphaser=in_gain=0.6:out_gain=0.8:delay=${(1 + x / 40).toFixed(1)}:decay=0.5:speed=0.6` },
+  bass: { label: "Bass boost", hint: "Low-end lift", af: (x: number) => `bass=g=${Math.round(x / 5)}:f=100,alimiter=limit=0.95:level=disabled` },
+  treble: { label: "Treble boost", hint: "Crisper highs", af: (x: number) => `treble=g=${Math.round(x / 6)}:f=4000,alimiter=limit=0.95:level=disabled` },
+  telephone: { label: "Telephone", hint: "Lo-fi band-pass", af: () => "highpass=f=400,lowpass=f=3200,acompressor=threshold=-20dB:ratio=4" },
+  radio: { label: "Old radio", hint: "Narrow + crunch", af: (x: number) => `highpass=f=300,lowpass=f=4500,acrusher=bits=${Math.max(4, 12 - Math.round(x / 15))}:mix=0.4` },
+  pitchup: { label: "Chipmunk", hint: "Pitch up", af: () => "aresample=44100,asetrate=58800,aresample=44100,atempo=0.75" },
+  pitchdown: { label: "Deep voice", hint: "Pitch down", af: () => "aresample=44100,asetrate=33075,aresample=44100,atempo=1.3333" },
+  robot: { label: "Robot", hint: "Metallic", af: () => "afftfilt=real='hypot(re,im)*sin(0)':imag='hypot(re,im)*cos(0)':win_size=512:overlap=0.75" },
+} as const;
+type Effect = keyof typeof EFFECTS;
+const AMOUNT: Effect[] = ["echo", "reverb", "chorus", "flanger", "phaser", "bass", "treble", "radio"];
 
-export default function AudioEffectsStudioClient() {
-  const [file, setFile] = useState<File | null>(null);
-  const [effect, setEffect] = useState("echo");
-  const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{
-    url: string;
-    size: number;
-    time: number;
-  } | null>(null);
+export default function AudioEffectsStudio() {
+  const [effect, setEffect] = useState<Effect>("reverb");
+  const [amount, setAmount] = useState(50);
+  const [format, setFormat] = useState<AudioFormat>("mp3");
+  const media = useMediaFile("audio", (_, f) => setFormat(audioFormatFor(f)));
 
-  const { ffmpeg, loaded, fetchFile, setOnProgress } = useFFmpeg();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const reset = () => {
-    setFile(null);
-    setResult(null);
-    setError(null);
-    setProgress(0);
-    setEffect("echo");
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const handleFile = (f: File | null) => {
-    if (!f) return;
-    if (!f.type.startsWith("audio/")) {
-      setError("Please upload a valid audio file.");
-      return;
-    }
-    setFile(f);
-    setError(null);
-    setResult(null);
-  };
-
-  const selectedFilter = effects.find((e) => e.value === effect)?.filter || effects[0].filter;
-
-  const handleProcess = async () => {
-    if (!file || !ffmpeg || !loaded) return;
-    setProcessing(true);
-    setProgress(0);
-    setError(null);
-    setResult(null);
-
-    const start = performance.now();
-    try {
-      const ext = file.name.substring(file.name.lastIndexOf(".")) || ".mp3";
-      const inputName = "input" + ext;
-      const outputName = "output" + ext;
-
-      await ffmpeg.writeFile(inputName, await fetchFile(file));
-
-      setOnProgress((p) => setProgress(p));
-      await ffmpeg.exec([
-        "-i", inputName,
-        "-af", selectedFilter,
-        "-c:a", "libmp3lame",
-        "-q:a", "2",
-        "-y", outputName,
-      ]);
-
-      const data = await ffmpeg.readFile(outputName);
-      const blob = new Blob([new Uint8Array(data as unknown as ArrayBuffer)], {
-        type: file.type,
-      });
-      const url = URL.createObjectURL(blob);
-
-      setResult({ url, size: blob.size, time: (performance.now() - start) / 1000 });
-
-      await ffmpeg.deleteFile(inputName);
-      await ffmpeg.deleteFile(outputName);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Processing failed");
-    } finally {
-      setProcessing(false);
-      setOnProgress(null);
-    }
+  const apply = () => {
+    if (!media.file) return;
+    const o = audioOutput(format, media.file, effect);
+    media.run({ args: (input) => ["-i", input, "-vn", "-af", EFFECTS[effect].af(amount), ...o.codec, o.output], output: o.output, mime: o.mime, filename: o.filename });
   };
 
   return (
     <ToolLayout toolId="audio-effects-studio">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-4 order-last space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-4">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">
-                  Effect
-                </Label>
-                <div className="grid grid-cols-1 gap-2">
-                  {effects.map((e) => (
-                    <button
-                      key={e.value}
-                      onClick={() => setEffect(e.value)}
-                      className={cn(
-                        "flex items-center justify-between p-3 rounded-xl border-2 transition-all",
-                        effect === e.value
-                          ? "bg-primary border-primary text-primary-foreground shadow-md"
-                          : "bg-card border-border hover:border-primary/20 text-foreground"
-                      )}
-                    >
-                      <span className="text-xs font-black uppercase tracking-tight">{e.label}</span>
-                      <span className="text-[10px] font-bold opacity-70">{e.desc}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-border/40 space-y-3">
-                <Button
-                  onClick={handleProcess}
-                  disabled={!file || processing || !loaded}
-                  className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-                >
-                  <Sparkles className="w-5 h-5 mr-2" />
-                  Apply Effect
-                </Button>
-                <Button variant="ghost" onClick={reset} className="w-full rounded-xl font-bold h-10">
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Reset
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Wand2 className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Real-time FX</h3>
-            </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Effects are applied as audio filters. For best results, use uncompressed WAV or FLAC as input. Output is MP3 for universal playback.
-            </p>
-          </div>
-        </div>
-
-        <div className="lg:col-span-8 order-first flex flex-col gap-6">
-          {!file && !result && (
-            <Card className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[3rem] overflow-hidden min-h-[320px] flex flex-col items-center justify-center gap-6 cursor-pointer transition-all hover:border-primary/30 hover:shadow-primary/10" onClick={() => fileInputRef.current?.click()}>
-              <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0] || null)} />
-              <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center"><Upload className="w-8 h-8 text-primary" /></div>
-              <div className="text-center space-y-2"><p className="font-bold text-lg">Drop audio file here</p><p className="text-sm text-muted-foreground">or click to browse</p></div>
-            </Card>
-          )}
-
-          {file && !result && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-8 flex items-center gap-5">
-                <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0"><Music className="w-7 h-7 text-primary" /></div>
-                <div className="flex-1 min-w-0"><p className="font-bold text-sm truncate">{file.name}</p><p className="text-xs text-muted-foreground">{formatFileSize(file.size)} · {file.type.split("/")[1]?.toUpperCase() || "AUDIO"}</p></div>
-                {!processing && <Button variant="ghost" size="icon" onClick={reset} className="rounded-xl h-10 w-10 text-destructive hover:bg-destructive/10"><Trash2 className="w-4 h-4" /></Button>}
-              </CardContent>
-            </Card>
-          )}
-
-          {processing && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-12 flex flex-col items-center gap-6">
-                <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                <div className="text-center space-y-2"><p className="font-bold text-lg">Applying {effect}...</p><p className="text-sm text-muted-foreground">{progress}% complete</p></div>
-                <div className="w-full max-w-md h-2 bg-muted rounded-full overflow-hidden"><div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: `${progress}%` }} /></div>
-              </CardContent>
-            </Card>
-          )}
-
-          {error && <div className="p-5 rounded-2xl bg-destructive/10 border border-destructive/20 text-destructive text-sm font-bold flex items-center gap-3"><AlertCircle className="w-5 h-5 shrink-0" />{error}</div>}
-
-          {result && (
-            <Card className="border-emerald-500/30 shadow-2xl shadow-emerald-500/10 bg-gradient-to-br from-emerald-500/10 to-primary/5 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-10 flex flex-col items-center gap-8">
-                <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center"><CheckCircle2 className="w-10 h-10 text-emerald-500" /></div>
-                <div className="text-center space-y-1"><p className="text-2xl font-black">Effect Applied!</p><p className="text-sm text-muted-foreground">{formatFileSize(result.size)} · {result.time.toFixed(1)}s</p></div>
-                <div className="flex gap-3 w-full max-w-md">
-                  <Button onClick={() => { const a = document.createElement("a"); a.href = result.url; const base = file?.name.split(".")[0] || "audio"; const ext = file?.name.substring(file.name.lastIndexOf(".")) || ".mp3"; a.download = `${base}_${effect}${ext}`; a.click(); }} className="flex-1 h-14 rounded-2xl text-lg font-bold bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 transition-all"><Download className="w-5 h-5 mr-2" />Download</Button>
-                  <Button variant="outline" onClick={reset} className="h-14 rounded-2xl font-bold px-6"><RefreshCw className="w-4 h-4 mr-2" />New</Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
+      <MediaTool
+        media={media}
+        options={
+          <>
+            <Field label="Effect">
+              <ChoiceGrid cols={3} value={effect} onChange={setEffect} options={(Object.keys(EFFECTS) as Effect[]).map((k) => ({ value: k, label: EFFECTS[k].label, hint: EFFECTS[k].hint }))} />
+            </Field>
+            {AMOUNT.includes(effect) && <SliderField label="Amount" value={amount} onChange={setAmount} min={0} max={100} format={(v) => `${v}%`} />}
+            <AudioFormatField value={format} onChange={setFormat} />
+          </>
+        }
+        action={{ label: `Apply ${EFFECTS[effect].label}`, busyLabel: "Processing", icon: <Sparkles />, onClick: apply }}
+      />
     </ToolLayout>
   );
 }

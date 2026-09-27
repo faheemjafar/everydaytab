@@ -1,310 +1,57 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
+import { TrendingUp } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import {
-  Activity,
-  Upload,
-  Download,
-  Music,
-  Trash2,
-  CheckCircle2,
-  AlertCircle,
-  RotateCcw,
-  RefreshCw,
-  Zap,
-} from "lucide-react";
-import { useFFmpeg } from "@/hooks/use-ffmpeg";
-import { formatFileSize, formatTime } from "@/lib/audio-utils";
-import { cn } from "@/lib/utils";
+import { AudioFormatField, Field, MediaTool, Segmented, SliderField, audioFormatFor, audioOutput, useMediaFile, type AudioFormat } from "@/components/tool";
+
+const CURVES = [
+  { value: "tri", label: "Linear" },
+  { value: "qsin", label: "Smooth" },
+  { value: "exp", label: "Exponential" },
+  { value: "log", label: "Logarithmic" },
+] as const;
+type Curve = (typeof CURVES)[number]["value"];
 
 export default function FadeInOut() {
-  const [file, setFile] = useState<File | null>(null);
   const [fadeIn, setFadeIn] = useState(2);
-  const [fadeOut, setFadeOut] = useState(2);
-  const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{
-    url: string;
-    size: number;
-    time: number;
-  } | null>(null);
+  const [fadeOut, setFadeOut] = useState(3);
+  const [curve, setCurve] = useState<Curve>("qsin");
+  const [format, setFormat] = useState<AudioFormat>("mp3");
+  const media = useMediaFile("audio", (_, f) => setFormat(audioFormatFor(f)));
+  const dur = media.info?.duration ?? NaN;
+  const known = Number.isFinite(dur);
+  const max = known ? Math.max(0.5, Math.min(30, dur / 2)) : 30;
 
-  const { ffmpeg, loaded, fetchFile, setOnProgress } = useFFmpeg();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const reset = () => {
-    setFile(null);
-    setResult(null);
-    setError(null);
-    setProgress(0);
-    setFadeIn(2);
-    setFadeOut(2);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const handleFile = (f: File | null) => {
-    if (!f) return;
-    if (!f.type.startsWith("audio/")) {
-      setError("Please upload a valid audio file.");
-      return;
-    }
-    setFile(f);
-    setError(null);
-    setResult(null);
-  };
-
-  const handleProcess = async () => {
-    if (!file || !ffmpeg || !loaded) return;
-    setProcessing(true);
-    setProgress(0);
-    setError(null);
-    setResult(null);
-
-    const start = performance.now();
-    try {
-      const ext = file.name.substring(file.name.lastIndexOf(".")) || ".mp3";
-      const inputName = "input" + ext;
-      const outputName = "faded" + ext;
-
-      await ffmpeg.writeFile(inputName, await fetchFile(file));
-
-      const filters: string[] = [];
-      if (fadeIn > 0) filters.push(`afade=t=in:st=0:d=${fadeIn}`);
-      if (fadeOut > 0) {
-        // We need duration to place fade out correctly
-        // Use a two-pass approach: first get duration via ffprobe isn't available,
-        // so we'll use a simpler approach: fade out from the end
-        filters.push(`afade=t=out:st=0:d=${fadeOut}:curve=tri`);
-      }
-
-      // Build filter: afade in at start, then reverse + afade in (which becomes out) + reverse
-      let filterString = "";
-      if (fadeIn > 0 && fadeOut > 0) {
-        filterString = `afade=t=in:st=0:d=${fadeIn},areverse,afade=t=in:st=0:d=${fadeOut},areverse`;
-      } else if (fadeIn > 0) {
-        filterString = `afade=t=in:st=0:d=${fadeIn}`;
-      } else if (fadeOut > 0) {
-        filterString = `areverse,afade=t=in:st=0:d=${fadeOut},areverse`;
-      }
-
-      setOnProgress((p) => setProgress(p));
-      if (filterString) {
-        await ffmpeg.exec(["-i", inputName, "-af", filterString, outputName]);
-      } else {
-        // No fade, just copy
-        await ffmpeg.exec(["-i", inputName, "-c", "copy", outputName]);
-      }
-
-      const data = await ffmpeg.readFile(outputName);
-      const blob = new Blob([new Uint8Array(data as unknown as ArrayBuffer)], {
-        type: file.type || "audio/mpeg",
-      });
-      const url = URL.createObjectURL(blob);
-
-      setResult({ url, size: blob.size, time: (performance.now() - start) / 1000 });
-
-      await ffmpeg.deleteFile(inputName);
-      await ffmpeg.deleteFile(outputName);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Processing failed");
-    } finally {
-      setProcessing(false);
-      setOnProgress(null);
-    }
+  const apply = () => {
+    if (!media.file) return;
+    const o = audioOutput(format, media.file, "faded");
+    // With a known duration, fade-out starts at (duration − length); otherwise
+    // reverse → fade in → reverse (slower, uses more memory).
+    const inF = fadeIn > 0 ? `afade=t=in:st=0:d=${fadeIn}:curve=${curve}` : "";
+    const outF = fadeOut > 0 ? (known ? `afade=t=out:st=${(dur - fadeOut).toFixed(3)}:d=${fadeOut}:curve=${curve}` : `areverse,afade=t=in:st=0:d=${fadeOut}:curve=${curve},areverse`) : "";
+    const af = [inF, outF].filter(Boolean).join(",");
+    media.run({ args: (input) => ["-i", input, "-vn", "-af", af, ...o.codec, o.output], output: o.output, mime: o.mime, filename: o.filename });
   };
 
   return (
     <ToolLayout toolId="fade-in-out">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-4 order-last space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-6">
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                      Fade In
-                    </Label>
-                    <span className="text-xs font-black text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                      {fadeIn}s
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={10}
-                    step={0.5}
-                    value={fadeIn}
-                    onChange={(e) => setFadeIn(parseFloat(e.target.value))}
-                    className="w-full h-2 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
-                  />
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                      Fade Out
-                    </Label>
-                    <span className="text-xs font-black text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                      {fadeOut}s
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={10}
-                    step={0.5}
-                    value={fadeOut}
-                    onChange={(e) => setFadeOut(parseFloat(e.target.value))}
-                    className="w-full h-2 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-border/40 space-y-3">
-                <Button
-                  onClick={handleProcess}
-                  disabled={!file || processing || !loaded}
-                  className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-                >
-                  <Activity className="w-5 h-5 mr-2" />
-                  Apply Fades
-                </Button>
-                <Button variant="ghost" onClick={reset} className="w-full rounded-xl font-bold h-10">
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Reset
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Smooth Fades</h3>
-            </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Uses logarithmic curves for natural-sounding volume ramps that eliminate clicks at boundaries.
-            </p>
-          </div>
-        </div>
-
-        <div className="lg:col-span-8 order-first flex flex-col gap-6">
-          {!file && !result && (
-            <Card
-              className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[3rem] overflow-hidden min-h-[320px] flex flex-col items-center justify-center gap-6 cursor-pointer transition-all hover:border-primary/30 hover:shadow-primary/10"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/*"
-                className="hidden"
-                onChange={(e) => handleFile(e.target.files?.[0] || null)}
-              />
-              <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center">
-                <Upload className="w-8 h-8 text-primary" />
-              </div>
-              <div className="text-center space-y-2">
-                <p className="font-bold text-lg">Drop audio file here</p>
-                <p className="text-sm text-muted-foreground">or click to browse</p>
-              </div>
-            </Card>
-          )}
-
-          {file && !result && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-8 flex items-center gap-5">
-                <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                  <Music className="w-7 h-7 text-primary" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm truncate">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatFileSize(file.size)} · {file.type.split("/")[1]?.toUpperCase() || "AUDIO"}
-                  </p>
-                </div>
-                {!processing && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={reset}
-                    className="rounded-xl h-10 w-10 text-destructive hover:bg-destructive/10"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {processing && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-12 flex flex-col items-center gap-6">
-                <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                <div className="text-center space-y-2">
-                  <p className="font-bold text-lg">Applying fades...</p>
-                  <p className="text-sm text-muted-foreground">{progress}% complete</p>
-                </div>
-                <div className="w-full max-w-md h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all duration-300"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {error && (
-            <div className="p-5 rounded-2xl bg-destructive/10 border border-destructive/20 text-destructive text-sm font-bold flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 shrink-0" />
-              {error}
-            </div>
-          )}
-
-          {result && (
-            <Card className="border-emerald-500/30 shadow-2xl shadow-emerald-500/10 bg-gradient-to-br from-emerald-500/10 to-primary/5 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-10 flex flex-col items-center gap-8">
-                <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                  <CheckCircle2 className="w-10 h-10 text-emerald-500" />
-                </div>
-                <div className="text-center space-y-1">
-                  <p className="text-2xl font-black">Fades Applied!</p>
-                  <p className="text-sm text-muted-foreground">
-                    {fadeIn}s in · {fadeOut}s out · {result.time.toFixed(1)}s
-                  </p>
-                </div>
-                <div className="flex gap-3 w-full max-w-md">
-                  <Button
-                    onClick={() => {
-                      const a = document.createElement("a");
-                      a.href = result.url;
-                      const base = file?.name.split(".")[0] || "audio";
-                      const ext = file?.name.substring(file.name.lastIndexOf(".")) || ".mp3";
-                      a.download = `${base}_faded${ext}`;
-                      a.click();
-                    }}
-                    className="flex-1 h-14 rounded-2xl text-lg font-bold bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 transition-all"
-                  >
-                    <Download className="w-5 h-5 mr-2" />
-                    Download
-                  </Button>
-                  <Button variant="outline" onClick={reset} className="h-14 rounded-2xl font-bold px-6">
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    New
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
+      <MediaTool
+        media={media}
+        range={known ? { start: fadeIn, end: dur - fadeOut } : undefined}
+        options={
+          <>
+            <SliderField label="Fade in" value={fadeIn} onChange={setFadeIn} min={0} max={max} step={0.1} format={(v) => (v ? `${v.toFixed(1)}s` : "off")} />
+            <SliderField label="Fade out" value={fadeOut} onChange={setFadeOut} min={0} max={max} step={0.1} format={(v) => (v ? `${v.toFixed(1)}s` : "off")} />
+            <Field label="Curve">
+              <Segmented size="sm" value={curve} onChange={setCurve} options={CURVES.map((c) => ({ value: c.value, label: c.label }))} />
+            </Field>
+            <AudioFormatField value={format} onChange={setFormat} />
+            <p className="text-[11px] text-muted-foreground">The highlighted part of the waveform plays at full volume.</p>
+          </>
+        }
+        action={{ label: "Apply fades", busyLabel: "Processing", icon: <TrendingUp />, onClick: apply, disabled: !fadeIn && !fadeOut }}
+      />
     </ToolLayout>
   );
 }

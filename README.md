@@ -118,7 +118,7 @@ Conventions for the UI system are in [`AGENTS.md`](AGENTS.md).
 
 ## Roadmap
 
-- [ ] Migrate remaining tools onto the shared primitives (66 of 240 done — PDF, Image and Video complete)
+- [ ] Migrate remaining tools onto the shared primitives (85 of 240 done — PDF, Image, Video and Audio complete)
 - [ ] Build-time popularity ranking from analytics exports
 - [ ] More PDF tools (OCR, redaction, form filling)
 - [ ] Batch/queue processing for file-based tools

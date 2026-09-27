@@ -1,334 +1,79 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
+import { Gauge } from "lucide-react";
 import { ToolLayout } from "@/components/tool-layout";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import {
-  Gauge,
-  Upload,
-  Download,
-  Music,
-  Trash2,
-  CheckCircle2,
-  AlertCircle,
-  RotateCcw,
-  RefreshCw,
-  Zap,
-} from "lucide-react";
-import { useFFmpeg } from "@/hooks/use-ffmpeg";
-import { formatFileSize } from "@/lib/audio-utils";
-import { cn } from "@/lib/utils";
+import { AudioFormatField, Field, MediaTool, Segmented, SliderField, audioFormatFor, audioOutput, formatDuration, useMediaFile, type AudioFormat } from "@/components/tool";
 
-const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+const PRESETS = [0.5, 0.75, 0.9, 1.1, 1.25, 1.5, 2];
+
+/** atempo accepts 0.5–2 per instance; chain for other factors. */
+function atempoChain(speed: number) {
+  const f: string[] = [];
+  let s = speed;
+  while (s > 2) {
+    f.push("atempo=2");
+    s /= 2;
+  }
+  while (s < 0.5) {
+    f.push("atempo=0.5");
+    s /= 0.5;
+  }
+  f.push(`atempo=${s.toFixed(4)}`);
+  return f.join(",");
+}
 
 export default function SpeedChanger() {
-  const [file, setFile] = useState<File | null>(null);
-  const [speed, setSpeed] = useState(1.0);
-  const [preservePitch, setPreservePitch] = useState(true);
-  const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{
-    url: string;
-    size: number;
-    time: number;
-  } | null>(null);
+  const [speed, setSpeed] = useState(1.25);
+  const [pitch, setPitch] = useState<"keep" | "shift">("keep");
+  const [format, setFormat] = useState<AudioFormat>("mp3");
+  const media = useMediaFile("audio", (_, f) => setFormat(audioFormatFor(f)));
+  const dur = media.info?.duration ?? NaN;
 
-  const { ffmpeg, loaded, fetchFile, setOnProgress } = useFFmpeg();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const reset = () => {
-    setFile(null);
-    setResult(null);
-    setError(null);
-    setProgress(0);
-    setSpeed(1.0);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+  const apply = () => {
+    if (!media.file) return;
+    const o = audioOutput(format, media.file, `${speed}x`);
+    // "shift": resample like a tape/vinyl speed change (pitch moves with speed).
+    const af = pitch === "keep" ? atempoChain(speed) : `aresample=44100,asetrate=${Math.round(44100 * speed)},aresample=44100`;
+    media.run({ args: (input) => ["-i", input, "-vn", "-af", af, ...o.codec, o.output], output: o.output, mime: o.mime, filename: o.filename });
   };
 
-  const handleFile = (f: File | null) => {
-    if (!f) return;
-    if (!f.type.startsWith("audio/")) {
-      setError("Please upload a valid audio file.");
-      return;
-    }
-    setFile(f);
-    setError(null);
-    setResult(null);
-  };
-
-  const handleProcess = async () => {
-    if (!file || !ffmpeg || !loaded) return;
-    setProcessing(true);
-    setProgress(0);
-    setError(null);
-    setResult(null);
-
-    const start = performance.now();
-    try {
-      const ext = file.name.substring(file.name.lastIndexOf(".")) || ".mp3";
-      const inputName = "input" + ext;
-      const outputName = "speed_changed" + ext;
-
-      await ffmpeg.writeFile(inputName, await fetchFile(file));
-
-      setOnProgress((p) => setProgress(p));
-
-      // Use atempo for speed without pitch change, or asetrate for both
-      let filter: string;
-      if (preservePitch) {
-        // For speeds outside 0.5-2.0 atempo range, chain multiple atempo filters
-        if (speed >= 0.5 && speed <= 2.0) {
-          filter = `atempo=${speed}`;
-        } else {
-          // Chain multiple atempo filters for extreme speeds
-          const steps = speed > 2.0 ? [2.0, speed / 2.0] : [0.5, speed / 0.5];
-          filter = steps.map((s) => `atempo=${s}`).join(",");
-        }
-      } else {
-        // Change both speed and pitch by resampling
-        const sampleRate = 44100;
-        const newRate = Math.round(sampleRate / speed);
-        filter = `asetrate=${newRate}`;
-      }
-
-      await ffmpeg.exec(["-i", inputName, "-af", filter, outputName]);
-
-      const data = await ffmpeg.readFile(outputName);
-      const blob = new Blob([new Uint8Array(data as unknown as ArrayBuffer)], {
-        type: file.type || "audio/mpeg",
-      });
-      const url = URL.createObjectURL(blob);
-
-      setResult({ url, size: blob.size, time: (performance.now() - start) / 1000 });
-
-      await ffmpeg.deleteFile(inputName);
-      await ffmpeg.deleteFile(outputName);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Processing failed");
-    } finally {
-      setProcessing(false);
-      setOnProgress(null);
-    }
-  };
+  const semis = 12 * Math.log2(speed);
 
   return (
     <ToolLayout toolId="speed-changer">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-4 order-last space-y-6">
-          <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-            <CardContent className="p-8 space-y-8">
-              <div className="space-y-4">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">
-                  Playback Speed
-                </Label>
-                <div className="text-center">
-                  <span className="text-3xl font-black">{speed}x</span>
-                </div>
-                <input
-                  type="range"
-                  min={0.25}
-                  max={3}
-                  step={0.05}
-                  value={speed}
-                  onChange={(e) => setSpeed(parseFloat(e.target.value))}
-                  className="w-full h-2 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
-                />
-                <div className="flex justify-between text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                  <span>0.25x</span>
-                  <span>1x</span>
-                  <span>3x</span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 pt-2">
-                  {speeds.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setSpeed(s)}
-                      className={cn(
-                        "p-2 rounded-xl border-2 text-xs font-black transition-all",
-                        Math.abs(speed - s) < 0.01
-                          ? "bg-primary border-primary text-primary-foreground shadow-md"
-                          : "bg-card border-border hover:border-primary/20 text-foreground"
-                      )}
-                    >
-                      {s}x
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-3 pt-2 border-t border-border/40">
-                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground ml-1">
-                  Pitch
-                </Label>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setPreservePitch(true)}
-                    className={cn(
-                      "flex-1 p-3 rounded-xl border-2 text-xs font-black transition-all",
-                      preservePitch
-                        ? "bg-primary border-primary text-primary-foreground shadow-md"
-                        : "bg-card border-border hover:border-primary/20 text-foreground"
-                    )}
-                  >
-                    Preserve Pitch
-                  </button>
-                  <button
-                    onClick={() => setPreservePitch(false)}
-                    className={cn(
-                      "flex-1 p-3 rounded-xl border-2 text-xs font-black transition-all",
-                      !preservePitch
-                        ? "bg-primary border-primary text-primary-foreground shadow-md"
-                        : "bg-card border-border hover:border-primary/20 text-foreground"
-                    )}
-                  >
-                    Change Pitch
-                  </button>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-border/40 space-y-3">
-                <Button
-                  onClick={handleProcess}
-                  disabled={!file || processing || !loaded}
-                  className="w-full h-14 rounded-2xl text-lg font-bold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all active:scale-[0.98]"
-                >
-                  <Gauge className="w-5 h-5 mr-2" />
-                  Apply Speed
-                </Button>
-                <Button variant="ghost" onClick={reset} className="w-full rounded-xl font-bold h-10">
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Reset
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="p-6 rounded-3xl bg-primary/5 border border-primary/10 space-y-4">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-primary" />
-              <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Tip</h3>
+      <MediaTool
+        media={media}
+        options={
+          <>
+            <SliderField label="Speed" value={speed} onChange={setSpeed} min={0.25} max={4} step={0.05} format={(v) => `${v.toFixed(2)}×`} />
+            <div className="flex flex-wrap gap-1">
+              {PRESETS.map((p) => (
+                <button key={p} type="button" onClick={() => setSpeed(p)} className={"h-6 px-2 rounded-sm border text-[11px] " + (speed === p ? "border-primary bg-accent" : "border-border text-muted-foreground hover:text-foreground")}>
+                  {p}×
+                </button>
+              ))}
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Preserve Pitch uses FFmpeg&apos;s atempo filter to stretch time without changing frequency. Change Pitch resamples the audio naturally.
-            </p>
-          </div>
-        </div>
-
-        <div className="lg:col-span-8 order-first flex flex-col gap-6">
-          {!file && !result && (
-            <Card
-              className="border-border/40 shadow-2xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[3rem] overflow-hidden min-h-[320px] flex flex-col items-center justify-center gap-6 cursor-pointer transition-all hover:border-primary/30 hover:shadow-primary/10"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/*"
-                className="hidden"
-                onChange={(e) => handleFile(e.target.files?.[0] || null)}
+            <Field label="Pitch" hint={pitch === "keep" ? "Time-stretch: voices sound natural." : `Tape-style: pitch moves ${semis >= 0 ? "up" : "down"} ${Math.abs(semis).toFixed(1)} semitones.`}>
+              <Segmented
+                value={pitch}
+                onChange={setPitch}
+                options={[
+                  { value: "keep", label: "Keep pitch" },
+                  { value: "shift", label: "Change pitch" },
+                ]}
               />
-              <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center">
-                <Upload className="w-8 h-8 text-primary" />
-              </div>
-              <div className="text-center space-y-2">
-                <p className="font-bold text-lg">Drop audio file here</p>
-                <p className="text-sm text-muted-foreground">or click to browse</p>
-              </div>
-            </Card>
-          )}
-
-          {file && !result && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-8 flex items-center gap-5">
-                <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                  <Music className="w-7 h-7 text-primary" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm truncate">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatFileSize(file.size)} · {file.type.split("/")[1]?.toUpperCase() || "AUDIO"}
-                  </p>
-                </div>
-                {!processing && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={reset}
-                    className="rounded-xl h-10 w-10 text-destructive hover:bg-destructive/10"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {processing && (
-            <Card className="border-border/40 shadow-xl shadow-primary/5 bg-card/40 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-12 flex flex-col items-center gap-6">
-                <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                <div className="text-center space-y-2">
-                  <p className="font-bold text-lg">Processing...</p>
-                  <p className="text-sm text-muted-foreground">{progress}% complete</p>
-                </div>
-                <div className="w-full max-w-md h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all duration-300"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {error && (
-            <div className="p-5 rounded-2xl bg-destructive/10 border border-destructive/20 text-destructive text-sm font-bold flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 shrink-0" />
-              {error}
-            </div>
-          )}
-
-          {result && (
-            <Card className="border-emerald-500/30 shadow-2xl shadow-emerald-500/10 bg-gradient-to-br from-emerald-500/10 to-primary/5 backdrop-blur-sm rounded-[2.5rem] overflow-hidden">
-              <CardContent className="p-10 flex flex-col items-center gap-8">
-                <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                  <CheckCircle2 className="w-10 h-10 text-emerald-500" />
-                </div>
-                <div className="text-center space-y-1">
-                  <p className="text-2xl font-black">Done!</p>
-                  <p className="text-sm text-muted-foreground">
-                    {speed}x speed · {preservePitch ? "Pitch preserved" : "Pitch shifted"} · {result.time.toFixed(1)}s
-                  </p>
-                </div>
-                <div className="flex gap-3 w-full max-w-md">
-                  <Button
-                    onClick={() => {
-                      const a = document.createElement("a");
-                      a.href = result.url;
-                      const base = file?.name.split(".")[0] || "audio";
-                      const ext = file?.name.substring(file.name.lastIndexOf(".")) || ".mp3";
-                      a.download = `${base}_${speed}x${ext}`;
-                      a.click();
-                    }}
-                    className="flex-1 h-14 rounded-2xl text-lg font-bold bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/20 transition-all"
-                  >
-                    <Download className="w-5 h-5 mr-2" />
-                    Download
-                  </Button>
-                  <Button variant="outline" onClick={reset} className="h-14 rounded-2xl font-bold px-6">
-                    <RefreshCw className="w-4 h-4 mr-2" />
-                    New
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
+            </Field>
+            <AudioFormatField value={format} onChange={setFormat} />
+            {Number.isFinite(dur) && (
+              <p className="text-[11px] text-muted-foreground tabular-nums">
+                {formatDuration(dur)} → <span className="text-foreground font-medium">{formatDuration(dur / speed)}</span>
+              </p>
+            )}
+          </>
+        }
+        action={{ label: `Apply ${speed.toFixed(2)}×`, busyLabel: "Processing", icon: <Gauge />, onClick: apply, disabled: speed === 1 }}
+      />
     </ToolLayout>
   );
 }
