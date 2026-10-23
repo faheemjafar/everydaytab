@@ -60,6 +60,7 @@
     "figlet": "^1.11.0",
     "generate-json-schema": "^1.0.0",
     "graphql": "^16.14.0",
+    "heic2any": "^0.0.4",
     "ibantools": "^4.5.4",
     "ip-address": "^10.2.0",
     "jose": "^6.2.3",

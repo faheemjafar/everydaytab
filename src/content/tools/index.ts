@@ -35,6 +35,12 @@ import combineMarkdown from "./combine-markdown";
 import cssFlexbox from "./css-flexbox";
 import etaCalculator from "./eta-calculator";
 import mouseMover from "./mouse-mover";
+import pdfToImage from "./pdf-to-image";
+import heicToJpg from "./heic-to-jpg";
+import screenRecorder from "./screen-recorder";
+import textToSpeech from "./text-to-speech";
+import pomodoroTimer from "./pomodoro-timer";
+import typingTest from "./typing-test";
 import fadeInOut from "./fade-in-out";
 import gifToVideo from "./gif-to-video";
 import isoFormatter from "./iso-formatter";
@@ -116,6 +122,12 @@ const registry: Record<string, ToolContent> = {
   "css-flexbox": cssFlexbox,
   "eta-calculator": etaCalculator,
   "mouse-mover": mouseMover,
+  "pdf-to-image": pdfToImage,
+  "heic-to-jpg": heicToJpg,
+  "screen-recorder": screenRecorder,
+  "text-to-speech": textToSpeech,
+  "pomodoro-timer": pomodoroTimer,
+  "typing-test": typingTest,
   "fade-in-out": fadeInOut,
   "gif-to-video": gifToVideo,
   "iso-formatter": isoFormatter,

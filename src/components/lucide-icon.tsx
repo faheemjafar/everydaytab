@@ -134,7 +134,10 @@ import {
   Target,
   Undo2,
   Volume2,
-  MousePointer2
+  MousePointer2,
+  Images,
+  ScreenShare,
+  Smartphone
 } from "lucide-react";
 
 const icons = {
@@ -272,7 +275,10 @@ const icons = {
   Target,
   Undo2,
   Volume2,
-  MousePointer2
+  MousePointer2,
+  Images,
+  ScreenShare,
+  Smartphone
 };
 
 export type IconName = keyof typeof icons;

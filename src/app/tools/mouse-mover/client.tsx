@@ -8,13 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Field, StatusBadge, ToolAlert, ToolPanel } from "@/components/tool";
 import { createLocalStore, useLocalStore, useMounted } from "@/lib/local-store";
+import { useWakeLock } from "@/hooks/use-wake-lock";
 import { cn } from "@/lib/utils";
 
 interface Prefs { wakeLock: boolean; audio: boolean; autoStop: string; autoStopOn: boolean }
 const prefs = createLocalStore<Prefs>("mouse-mover", { wakeLock: true, audio: true, autoStop: "", autoStopOn: false });
 
 const IDLE_MS = 3000;
-type LockState = "off" | "active" | "unsupported" | "denied";
 
 function fmt(ms: number) {
   const t = Math.max(0, Math.floor(ms / 1000));
@@ -29,37 +29,6 @@ function nextOccurrence(hhmm: string, from: number) {
   d.setHours(Number(m[1]), Number(m[2]), 0, 0);
   if (d.getTime() <= from) d.setDate(d.getDate() + 1);
   return d.getTime();
-}
-
-// Screen Wake Lock, re-acquired when the tab becomes visible again.
-function useWakeLock(enabled: boolean) {
-  const [state, setState] = useState<LockState>("off");
-  useEffect(() => {
-    if (!enabled) return;
-    let lock: WakeLockSentinel | null = null;
-    let cancelled = false;
-    const acquire = async () => {
-      if (cancelled || document.visibilityState !== "visible") return;
-      if (!("wakeLock" in navigator)) { setState("unsupported"); return; }
-      try {
-        lock = await navigator.wakeLock.request("screen");
-        if (cancelled) { lock.release(); return; }
-        setState("active");
-        lock.addEventListener("release", () => { if (!cancelled) setState("off"); });
-      } catch {
-        setState("denied");
-      }
-    };
-    acquire();
-    document.addEventListener("visibilitychange", acquire);
-    return () => {
-      cancelled = true;
-      document.removeEventListener("visibilitychange", acquire);
-      lock?.release();
-      setState("off");
-    };
-  }, [enabled]);
-  return state;
 }
 
 // Near-silent looping tone: many OSes treat a tab playing audio as "busy" and won't idle-lock.

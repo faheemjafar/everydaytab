@@ -97,12 +97,12 @@ export const categoryContent: Record<string, CategoryContent> = {
     ],
   },
   productivity: {
-    tagline: "Stay on task: timers, a stopwatch and a mouse mover that keeps your screen awake.",
+    tagline: "Stay on task: pomodoro and stopwatch timers, a typing speed test and a mouse mover that keeps your screen awake.",
     intro: [
-      "Small tools for the working day that don't need an install: a millisecond stopwatch with laps and a countdown timer that keeps running in background tabs, and a browser-based mouse mover that uses the Screen Wake Lock API and silent audio to stop your computer sleeping or locking during downloads, presentations and long reads.",
+      "Small tools for the working day that don't need an install: a pomodoro timer with daily stats, a millisecond stopwatch with laps and a countdown timer that keep running in background tabs, a typing speed test that tracks your WPM over time, and a browser-based mouse mover that uses the Screen Wake Lock API and silent audio to stop your computer sleeping or locking during downloads, presentations and long reads.",
       "Everything runs locally in the tab — sessions and preferences are kept in your browser's storage, and nothing is sent to a server.",
     ],
-    featured: ["stopwatch", "mouse-mover"],
+    featured: ["pomodoro-timer", "stopwatch", "typing-test", "mouse-mover"],
     faqs: [
       { question: "Do the timers keep running if I switch tabs?", answer: "Yes. Start and end times are stored as timestamps, so the stopwatch and countdown stay exact in background tabs and even survive a page reload." },
       { question: "Can a web page really keep my screen awake?", answer: "Yes, via the Screen Wake Lock API supported by Chrome, Edge and Safari 16.4+. The mouse mover also plays an inaudible audio stream as a fallback for browsers without wake lock support." },
