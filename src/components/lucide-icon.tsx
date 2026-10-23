@@ -133,7 +133,8 @@ import {
   Tags,
   Target,
   Undo2,
-  Volume2
+  Volume2,
+  MousePointer2
 } from "lucide-react";
 
 const icons = {
@@ -270,7 +271,8 @@ const icons = {
   Tags,
   Target,
   Undo2,
-  Volume2
+  Volume2,
+  MousePointer2
 };
 
 export type IconName = keyof typeof icons;

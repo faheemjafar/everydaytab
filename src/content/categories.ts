@@ -96,6 +96,18 @@ export const categoryContent: Record<string, CategoryContent> = {
       { question: "What is OKLCH and why do these tools support it?", answer: "OKLCH is a perceptually uniform colour space now supported in CSS. Equal steps in OKLCH look like equal steps to the eye, which makes it far better than HSL for generating consistent palettes and tints." },
     ],
   },
+  productivity: {
+    tagline: "Stay on task: timers, a stopwatch and a mouse mover that keeps your screen awake.",
+    intro: [
+      "Small tools for the working day that don't need an install: a millisecond stopwatch with laps and a countdown timer that keeps running in background tabs, and a browser-based mouse mover that uses the Screen Wake Lock API and silent audio to stop your computer sleeping or locking during downloads, presentations and long reads.",
+      "Everything runs locally in the tab — sessions and preferences are kept in your browser's storage, and nothing is sent to a server.",
+    ],
+    featured: ["stopwatch", "mouse-mover"],
+    faqs: [
+      { question: "Do the timers keep running if I switch tabs?", answer: "Yes. Start and end times are stored as timestamps, so the stopwatch and countdown stay exact in background tabs and even survive a page reload." },
+      { question: "Can a web page really keep my screen awake?", answer: "Yes, via the Screen Wake Lock API supported by Chrome, Edge and Safari 16.4+. The mouse mover also plays an inaudible audio stream as a fallback for browsers without wake lock support." },
+    ],
+  },
   file: {
     tagline: "Zip, unzip and rename files without installing anything.",
     intro: [

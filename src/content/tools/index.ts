@@ -34,6 +34,7 @@ import colorDistance from "./color-distance";
 import combineMarkdown from "./combine-markdown";
 import cssFlexbox from "./css-flexbox";
 import etaCalculator from "./eta-calculator";
+import mouseMover from "./mouse-mover";
 import fadeInOut from "./fade-in-out";
 import gifToVideo from "./gif-to-video";
 import isoFormatter from "./iso-formatter";
@@ -114,6 +115,7 @@ const registry: Record<string, ToolContent> = {
   "combine-markdown": combineMarkdown,
   "css-flexbox": cssFlexbox,
   "eta-calculator": etaCalculator,
+  "mouse-mover": mouseMover,
   "fade-in-out": fadeInOut,
   "gif-to-video": gifToVideo,
   "iso-formatter": isoFormatter,
